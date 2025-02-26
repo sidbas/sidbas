@@ -1,0 +1,46 @@
+import networkx as nx
+import matplotlib.pyplot as plt
+import xml.etree.ElementTree as ET
+
+def parse_xsd(xsd_file):
+    tree = ET.parse(xsd_file)
+    root = tree.getroot()
+    
+    ns = {'xs': 'http://www.w3.org/2001/XMLSchema'}
+    elements = []
+    
+    for elem in root.findall('.//xs:element', ns):
+        name = elem.get('name')
+        type_ = elem.get('type')
+        if name:
+            elements.append((name, type_ if type_ else "ComplexType"))
+    
+    return elements
+
+def visualize_xsd(xsd_file):
+    elements = parse_xsd(xsd_file)
+
+    G = nx.DiGraph()
+
+    for name, type_ in elements:
+        G.add_node(name, shape='box', color='lightblue')
+        if type_ and type_ != "ComplexType":
+            G.add_edge(name, type_)
+
+    plt.figure(figsize=(10, 8))  # Increase figure size for readability
+
+    try:
+        from networkx.drawing.nx_agraph import graphviz_layout
+        pos = graphviz_layout(G, prog="dot")  # Uses Graphviz layout for better spacing
+    except ImportError:
+        pos = nx.spring_layout(G, k=0.8, seed=42)  # Adjusted spring layout
+
+    nx.draw(G, pos, with_labels=True, node_color="lightblue", edge_color="gray",
+            node_size=2500, font_size=10, font_weight="bold", alpha=0.8)
+
+    plt.title("XSD Structure Visualization", fontsize=14)
+    plt.show()
+
+# Example Usage
+xsd_file = 'example.xsd'  # Provide the correct XSD file path
+visualize_xsd(xsd_file)
