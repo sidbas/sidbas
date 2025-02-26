@@ -1,0 +1,36 @@
+import xml.etree.ElementTree as ET
+import graphviz
+
+def parse_xsd(xsd_file):
+    tree = ET.parse(xsd_file)
+    root = tree.getroot()
+
+    ns = {'xs': 'http://www.w3.org/2001/XMLSchema'}
+    
+    elements = []
+    for elem in root.findall('.//xs:element', ns):
+        name = elem.get('name')
+        type_ = elem.get('type')
+        elements.append((name, type_))
+    
+    return elements
+
+def generate_xsd_graph(xsd_file, output_filename='xsd_diagram'):
+    elements = parse_xsd(xsd_file)
+
+    dot = graphviz.Digraph(format='png')
+    dot.attr(rankdir='LR')  # Left to right layout
+    
+    for name, type_ in elements:
+        dot.node(name, label=f'{name}\n({type_})', shape='box')
+
+    for name, type_ in elements:
+        if type_:
+            dot.edge(name, type_)
+
+    dot.render(output_filename)
+    print(f"Diagram saved as {output_filename}.png")
+
+# Example Usage
+xsd_file = 'example.xsd'  # Provide the path to your XSD file
+generate_xsd_graph(xsd_file)
