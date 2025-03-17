@@ -1,0 +1,55 @@
+from graphviz import Digraph
+
+class XPathGraph:
+    def __init__(self):
+        self.nodes = {}  # Stores nodes as a dictionary
+
+    def add_xpath(self, xpath):
+        """ Adds an XPath expression to the tree structure """
+        parts = xpath.strip('/').split('/')
+        parent = None
+        current_path = ""
+
+        for part in parts:
+            current_path = f"{current_path}/{part}" if current_path else f"/{part}"
+            
+            if current_path not in self.nodes:
+                self.nodes[current_path] = {"name": part, "parent": parent}
+            
+            parent = current_path
+
+    def generate_graph(self):
+        """ Generates a Graphviz hierarchical graph """
+        dot = Digraph(format='png')
+        dot.attr(dpi='300', rankdir="TB")  # Top-to-Bottom direction
+
+        # Add nodes
+        for path, info in self.nodes.items():
+            dot.node(path, info["name"])  
+
+        # Add edges
+        for path, info in self.nodes.items():
+            if info["parent"]:
+                dot.edge(info["parent"], path)
+
+        return dot
+
+# Sample XPath expressions
+xpaths = [
+    "/html/body/div",
+    "/html/body/div/h1",
+    "/html/body/div/p",
+    "/html/body/span",
+    "/html/head/title"
+]
+
+# Create graph object
+xpath_graph = XPathGraph()
+
+# Add XPaths to the graph
+for xpath in xpaths:
+    xpath_graph.add_xpath(xpath)
+
+# Generate and render graph
+graph = xpath_graph.generate_graph()
+graph.render("xpath_graph", view=True)  # Saves and opens the image
