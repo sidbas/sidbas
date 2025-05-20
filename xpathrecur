@@ -3,7 +3,16 @@ import pandas as pd
 
 NS = {'xs': 'http://www.w3.org/2001/XMLSchema'}
 
-def extract_children(element, path, results):
+# Build a map of all named complexTypes
+def collect_complex_types(root):
+    type_map = {}
+    for ct in root.findall(".//xs:complexType", NS):
+        name = ct.attrib.get("name")
+        if name:
+            type_map[name] = ct
+    return type_map
+
+def extract_children(element, path, results, type_map):
     sequence = element.find("xs:sequence", NS)
     if sequence is not None:
         for child in sequence.findall("xs:element", NS):
@@ -12,11 +21,12 @@ def extract_children(element, path, results):
                 continue
 
             xpath = f"{path}/{name}"
-            data_type = child.attrib.get("type", "complexType")
             min_occurs = child.attrib.get("minOccurs", "1")
             mandatory = "Mandatory" if min_occurs != "0" else "Optional"
+            data_type = child.attrib.get("type", "complexType")
             range_info = ""
 
+            # Handle restrictions (if any)
             restriction = child.find(".//xs:restriction", NS)
             if restriction is not None:
                 data_type = restriction.attrib.get("base", data_type)
@@ -35,48 +45,61 @@ def extract_children(element, path, results):
                 "Mandatory/Optional": mandatory
             })
 
-            # Recurse into deeper nested structure
+            # Handle nested inline complexType
             nested_complex = child.find("xs:complexType", NS)
             if nested_complex is not None:
-                extract_children(nested_complex, xpath, results)
+                extract_children(nested_complex, xpath, results, type_map)
+
+            # Handle referenced complexType via type="..."
+            elif "type" in child.attrib:
+                ref_type = child.attrib["type"]
+                if ":" in ref_type:
+                    ref_type = ref_type.split(":")[1]  # remove namespace
+                if ref_type in type_map:
+                    extract_children(type_map[ref_type], xpath, results, type_map)
 
 def process_xsd(xsd_path, output_excel):
     tree = ET.parse(xsd_path)
     root = tree.getroot()
     results = []
 
-    # Find root <xs:element name="Root">
-    root_element = root.find("xs:element", NS)
-    if root_element is None:
-        print("❌ No root element found.")
-        return
+    type_map = collect_complex_types(root)
 
-    root_name = root_element.attrib.get("name")
-    if not root_name:
-        print("❌ Root element has no name.")
-        return
+    # Start from the top-level root element
+    for element in root.findall("xs:element", NS):
+        root_name = element.attrib.get("name")
+        if not root_name:
+            continue
 
-    root_xpath = f"/{root_name}"
-    root_type = root_element.attrib.get("type", "complexType")
+        root_xpath = f"/{root_name}"
+        root_type = element.attrib.get("type", "complexType")
 
-    results.append({
-        "XPath": root_xpath,
-        "Data Type": root_type,
-        "Range": "",
-        "Sample": "",
-        "Mandatory/Optional": "Mandatory"
-    })
+        results.append({
+            "XPath": root_xpath,
+            "Data Type": root_type,
+            "Range": "",
+            "Sample": "",
+            "Mandatory/Optional": "Mandatory"
+        })
 
-    # Now recurse into the root element's children
-    complex_type = root_element.find("xs:complexType", NS)
-    if complex_type is not None:
-        extract_children(complex_type, root_xpath, results)
+        # Handle inline complexType
+        complex_type = element.find("xs:complexType", NS)
+        if complex_type is not None:
+            extract_children(complex_type, root_xpath, results, type_map)
+
+        # Handle referenced complexType
+        elif "type" in element.attrib:
+            ref_type = element.attrib["type"]
+            if ":" in ref_type:
+                ref_type = ref_type.split(":")[1]
+            if ref_type in type_map:
+                extract_children(type_map[ref_type], root_xpath, results, type_map)
 
     df = pd.DataFrame(results)
     df.to_excel(output_excel, index=False)
     print(f"✅ Extraction complete. Saved to: {output_excel}")
 
 # Example usage
-xsd_file = "your_file.xsd"         # Replace with your actual XSD file
-output_file = "xpaths_output.xlsx" # Excel output
+xsd_file = "your_file.xsd"         # Replace with actual file path
+output_file = "xpaths_output.xlsx"
 process_xsd(xsd_file, output_file)
