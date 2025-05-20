@@ -3,22 +3,22 @@ import pandas as pd
 
 NS = {'xs': 'http://www.w3.org/2001/XMLSchema'}
 
-def extract_elements(element, current_path, results):
-    for child in element.findall("xs:element", NS):
+def extract_elements_from_complex_type(parent, path, results):
+    sequence = parent.find("xs:sequence", NS)
+    if sequence is None:
+        return
+
+    for child in sequence.findall("xs:element", NS):
         name = child.attrib.get("name") or child.attrib.get("ref")
         if not name:
             continue
 
-        # Build absolute XPath
-        xpath = f"{current_path}/{name}" if current_path else f"/{name}"
-
-        # Default values
+        xpath = f"{path}/{name}"
         data_type = child.attrib.get("type", "complexType")
         min_occurs = child.attrib.get("minOccurs", "1")
         mandatory = "Mandatory" if min_occurs != "0" else "Optional"
         range_info = ""
 
-        # Handle simpleType restrictions
         restriction = child.find(".//xs:restriction", NS)
         if restriction is not None:
             data_type = restriction.attrib.get("base", data_type)
@@ -37,30 +37,43 @@ def extract_elements(element, current_path, results):
             "Mandatory/Optional": mandatory
         })
 
-        # Recurse into nested complexType > sequence
-        complex_type = child.find("xs:complexType", NS)
-        if complex_type is not None:
-            sequence = complex_type.find("xs:sequence", NS)
-            if sequence is not None:
-                extract_elements(sequence, xpath, results)
+        # Recursively process nested complex types
+        nested_complex = child.find("xs:complexType", NS)
+        if nested_complex is not None:
+            extract_elements_from_complex_type(nested_complex, xpath, results)
 
 def process_xsd(xsd_path, output_excel):
     tree = ET.parse(xsd_path)
     root = tree.getroot()
     results = []
 
-    # Start from top-level <xs:element> (schema root)
+    # Find root-level element
     for element in root.findall("xs:element", NS):
         name = element.attrib.get("name")
-        if name:
-            extract_elements(root, "", results)  # Start with empty path to include root in full XPath
-            break
+        if not name:
+            continue
+
+        root_xpath = f"/{name}"
+        data_type = element.attrib.get("type", "complexType")
+        mandatory = "Mandatory"
+        results.append({
+            "XPath": root_xpath,
+            "Data Type": data_type,
+            "Range": "",
+            "Sample": "",
+            "Mandatory/Optional": mandatory
+        })
+
+        # Start recursion from this root
+        complex_type = element.find("xs:complexType", NS)
+        if complex_type is not None:
+            extract_elements_from_complex_type(complex_type, root_xpath, results)
 
     df = pd.DataFrame(results)
     df.to_excel(output_excel, index=False)
-    print(f"✅ Done! Saved to: {output_excel}")
+    print(f"✅ Extraction complete. Output saved to: {output_excel}")
 
 # Example usage
-xsd_file = "your_file.xsd"
-output_file = "xsd_xpath_output.xlsx"
+xsd_file = "your_file.xsd"  # Replace with your XSD filename
+output_file = "xpaths_output.xlsx"
 process_xsd(xsd_file, output_file)
