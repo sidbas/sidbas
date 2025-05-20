@@ -12,13 +12,13 @@ def extract_elements(element, parent_path="") -> list:
         name = child.attrib.get("name") or child.attrib.get("ref")
         if name is None:
             continue
-        
+
         xpath = f"{parent_path}/{name}" if parent_path else f"/{name}"
         type_ = child.attrib.get("type", "complexType")
         min_occurs = child.attrib.get("minOccurs", "1")
         mandatory = "Mandatory" if min_occurs != "0" else "Optional"
 
-        # Look for restrictions inside a simpleType
+        # Extract restriction details
         restriction = child.find(".//xs:restriction", NS)
         range_info = ""
         if restriction is not None:
@@ -34,29 +34,29 @@ def extract_elements(element, parent_path="") -> list:
             "XPath": xpath,
             "Data Type": type_,
             "Range": range_info,
-            "Sample": "",  # Placeholder - can add logic for sample data
+            "Sample": "",
             "Mandatory/Optional": mandatory
         })
 
-        # Recurse into nested complex types
+        # Dive into nested complexTypes
         complex_type = child.find("xs:complexType", NS)
         if complex_type is not None:
-            elements += extract_elements(complex_type, xpath)
-
-    # Also look into complexType > sequence > element
-    for seq in element.findall("xs:complexType/xs:sequence", NS):
-        elements += extract_elements(seq, parent_path)
+            sequence = complex_type.find("xs:sequence", NS)
+            if sequence is not None:
+                elements += extract_elements(sequence, xpath)
 
     return elements
 
 def process_xsd(xsd_file_path: str, output_excel_path: str):
     tree = ET.parse(xsd_file_path)
     root = tree.getroot()
+
+    # Start from the root elements inside <xs:schema>
     elements_info = extract_elements(root)
 
     df = pd.DataFrame(elements_info)
     df.to_excel(output_excel_path, index=False)
-    print(f"Extraction complete. Excel saved to: {output_excel_path}")
+    print(f"✅ XPath extraction complete. Excel saved to: {output_excel_path}")
 
 # Example usage
 xsd_path = "your_file.xsd"
