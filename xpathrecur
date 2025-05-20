@@ -1,28 +1,27 @@
 import xml.etree.ElementTree as ET
 import pandas as pd
-import os
 
-# Namespace used in XSD files
 NS = {'xs': 'http://www.w3.org/2001/XMLSchema'}
 
-def extract_elements(element, parent_path="") -> list:
-    elements = []
-
+def extract_elements(element, current_path, results):
     for child in element.findall("xs:element", NS):
         name = child.attrib.get("name") or child.attrib.get("ref")
-        if name is None:
+        if not name:
             continue
 
-        xpath = f"{parent_path}/{name}" if parent_path else f"/{name}"
-        type_ = child.attrib.get("type", "complexType")
+        # Build absolute XPath
+        xpath = f"{current_path}/{name}" if current_path else f"/{name}"
+
+        # Default values
+        data_type = child.attrib.get("type", "complexType")
         min_occurs = child.attrib.get("minOccurs", "1")
         mandatory = "Mandatory" if min_occurs != "0" else "Optional"
-
-        # Extract restriction details
-        restriction = child.find(".//xs:restriction", NS)
         range_info = ""
+
+        # Handle simpleType restrictions
+        restriction = child.find(".//xs:restriction", NS)
         if restriction is not None:
-            type_ = restriction.attrib.get("base", type_)
+            data_type = restriction.attrib.get("base", data_type)
             parts = []
             for tag in ["minInclusive", "maxInclusive", "minExclusive", "maxExclusive", "pattern", "length"]:
                 val = restriction.find(f"xs:{tag}", NS)
@@ -30,35 +29,38 @@ def extract_elements(element, parent_path="") -> list:
                     parts.append(f"{tag}={val.attrib.get('value')}")
             range_info = ", ".join(parts)
 
-        elements.append({
+        results.append({
             "XPath": xpath,
-            "Data Type": type_,
+            "Data Type": data_type,
             "Range": range_info,
             "Sample": "",
             "Mandatory/Optional": mandatory
         })
 
-        # Dive into nested complexTypes
+        # Recurse into nested complexType > sequence
         complex_type = child.find("xs:complexType", NS)
         if complex_type is not None:
             sequence = complex_type.find("xs:sequence", NS)
             if sequence is not None:
-                elements += extract_elements(sequence, xpath)
+                extract_elements(sequence, xpath, results)
 
-    return elements
-
-def process_xsd(xsd_file_path: str, output_excel_path: str):
-    tree = ET.parse(xsd_file_path)
+def process_xsd(xsd_path, output_excel):
+    tree = ET.parse(xsd_path)
     root = tree.getroot()
+    results = []
 
-    # Start from the root elements inside <xs:schema>
-    elements_info = extract_elements(root)
+    # Start from top-level <xs:element> (schema root)
+    for element in root.findall("xs:element", NS):
+        name = element.attrib.get("name")
+        if name:
+            extract_elements(root, "", results)  # Start with empty path to include root in full XPath
+            break
 
-    df = pd.DataFrame(elements_info)
-    df.to_excel(output_excel_path, index=False)
-    print(f"✅ XPath extraction complete. Excel saved to: {output_excel_path}")
+    df = pd.DataFrame(results)
+    df.to_excel(output_excel, index=False)
+    print(f"✅ Done! Saved to: {output_excel}")
 
 # Example usage
-xsd_path = "your_file.xsd"
-output_path = "xpaths_output.xlsx"
-process_xsd(xsd_path, output_path)
+xsd_file = "your_file.xsd"
+output_file = "xsd_xpath_output.xlsx"
+process_xsd(xsd_file, output_file)
