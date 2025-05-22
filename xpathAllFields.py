@@ -3,13 +3,46 @@ import pandas as pd
 
 NS = {'xs': 'http://www.w3.org/2001/XMLSchema'}
 
-def collect_complex_types(root):
+def collect_type_definitions(root):
     type_map = {}
-    for ct in root.findall(".//xs:complexType", NS):
-        name = ct.attrib.get("name")
+    for t in root.findall(".//xs:complexType", NS) + root.findall(".//xs:simpleType", NS):
+        name = t.attrib.get("name")
         if name:
-            type_map[name] = ct
+            type_map[name] = t
     return type_map
+
+def extract_restrictions(type_element):
+    """Extract base type, pattern, length, and range info from xs:restriction."""
+    data_type = ""
+    pattern = ""
+    length = ""
+    range_info = ""
+
+    restriction = type_element.find("xs:restriction", NS)
+    if restriction is not None:
+        data_type = restriction.attrib.get("base", "")
+
+        # Range tags
+        range_parts = []
+        for tag in ["minInclusive", "maxInclusive", "minExclusive", "maxExclusive"]:
+            for val in restriction.findall(f"xs:{tag}", NS):
+                range_parts.append(f"{tag}={val.attrib.get('value')}")
+        range_info = ", ".join(range_parts)
+
+        # Pattern
+        pattern_el = restriction.find("xs:pattern", NS)
+        if pattern_el is not None:
+            pattern = pattern_el.attrib.get("value", "")
+
+        # Length-related tags
+        length_parts = []
+        for tag in ["length", "minLength", "maxLength"]:
+            val = restriction.find(f"xs:{tag}", NS)
+            if val is not None:
+                length_parts.append(f"{tag}={val.attrib.get('value')}")
+        length = ", ".join(length_parts)
+
+    return data_type, pattern, length, range_info
 
 def extract_children(element, path, results, type_map):
     sequence = element.find("xs:sequence", NS)
@@ -22,45 +55,54 @@ def extract_children(element, path, results, type_map):
             xpath = f"{path}/{name}"
             min_occurs = child.attrib.get("minOccurs", "1")
             mandatory = "Mandatory" if min_occurs != "0" else "Optional"
-            data_type = child.attrib.get("type", "complexType")
-            range_info = ""
+            data_type = child.attrib.get("type", "")
             pattern = ""
             length = ""
+            range_info = ""
 
-            # Look for restriction via inline xs:simpleType or referenced restriction
-            restriction = None
+            # 1. Inline xs:simpleType
             simple_type = child.find("xs:simpleType", NS)
             if simple_type is not None:
-                restriction = simple_type.find("xs:restriction", NS)
-            else:
-                restriction = child.find(".//xs:restriction", NS)
+                data_type, pattern, length, range_info = extract_restrictions(simple_type)
 
-            if restriction is not None:
-                data_type = restriction.attrib.get("base", data_type)
+            # 2. Inline xs:complexType with nested sequence
+            elif child.find("xs:complexType", NS) is not None:
+                results.append({
+                    "XPath": xpath,
+                    "Data Type": "complexType",
+                    "Range": "",
+                    "Pattern": "",
+                    "Length": "",
+                    "Sample": "",
+                    "Mandatory/Optional": mandatory
+                })
+                extract_children(child.find("xs:complexType", NS), xpath, results, type_map)
+                continue
 
-                # Capture range info
-                parts = []
-                for tag in ["minInclusive", "maxInclusive", "minExclusive", "maxExclusive"]:
-                    for val in restriction.findall(f"xs:{tag}", NS):
-                        parts.append(f"{tag}={val.attrib.get('value')}")
-                range_info = ", ".join(parts)
+            # 3. Referenced type
+            elif data_type:
+                type_name = data_type.split(":")[-1]  # remove namespace if present
+                ref_type = type_map.get(type_name)
+                if ref_type is not None:
+                    if ref_type.tag.endswith("simpleType"):
+                        data_type, pattern, length, range_info = extract_restrictions(ref_type)
+                    elif ref_type.tag.endswith("complexType"):
+                        results.append({
+                            "XPath": xpath,
+                            "Data Type": "complexType",
+                            "Range": "",
+                            "Pattern": "",
+                            "Length": "",
+                            "Sample": "",
+                            "Mandatory/Optional": mandatory
+                        })
+                        extract_children(ref_type, xpath, results, type_map)
+                        continue
 
-                # Capture pattern
-                pattern_el = restriction.find("xs:pattern", NS)
-                if pattern_el is not None:
-                    pattern = pattern_el.attrib.get("value", "")
-
-                # Capture length constraints
-                length_parts = []
-                for tag in ["length", "minLength", "maxLength"]:
-                    val = restriction.find(f"xs:{tag}", NS)
-                    if val is not None:
-                        length_parts.append(f"{tag}={val.attrib.get('value')}")
-                length = ", ".join(length_parts)
-
+            # Default row if no restrictions
             results.append({
                 "XPath": xpath,
-                "Data Type": data_type,
+                "Data Type": data_type or "complexType",
                 "Range": range_info,
                 "Pattern": pattern,
                 "Length": length,
@@ -68,39 +110,23 @@ def extract_children(element, path, results, type_map):
                 "Mandatory/Optional": mandatory
             })
 
-            # Recursively process inline complexTypes
-            nested_complex = child.find("xs:complexType", NS)
-            if nested_complex is not None:
-                extract_children(nested_complex, xpath, results, type_map)
-
-            # Handle referenced types
-            elif "type" in child.attrib:
-                ref_type = child.attrib["type"]
-                if ":" in ref_type:
-                    ref_type = ref_type.split(":")[1]  # Remove namespace prefix
-                if ref_type in type_map:
-                    extract_children(type_map[ref_type], xpath, results, type_map)
-
 def process_xsd(xsd_path, output_excel):
     tree = ET.parse(xsd_path)
     root = tree.getroot()
     results = []
 
-    type_map = collect_complex_types(root)
+    type_map = collect_type_definitions(root)
 
-    # Only process /Document element
+    # Start from /Document
     element = root.find("xs:element[@name='Document']", NS)
     if element is None:
         print("❌ Root element 'Document' not found.")
         return
 
-    root_name = element.attrib.get("name")
-    root_xpath = f"/{root_name}"
-    root_type = element.attrib.get("type", "complexType")
-
+    root_xpath = "/Document"
     results.append({
         "XPath": root_xpath,
-        "Data Type": root_type,
+        "Data Type": element.attrib.get("type", "complexType"),
         "Range": "",
         "Pattern": "",
         "Length": "",
@@ -108,18 +134,18 @@ def process_xsd(xsd_path, output_excel):
         "Mandatory/Optional": "Mandatory"
     })
 
-    # Recurse from root's complexType
-    complex_type = element.find("xs:complexType", NS)
-    if complex_type is not None:
-        extract_children(complex_type, root_xpath, results, type_map)
-    elif "type" in element.attrib:
-        ref_type = element.attrib["type"]
-        if ":" in ref_type:
-            ref_type = ref_type.split(":")[1]
-        if ref_type in type_map:
-            extract_children(type_map[ref_type], root_xpath, results, type_map)
+    # Process type
+    if "type" in element.attrib:
+        type_name = element.attrib["type"].split(":")[-1]
+        ref_type = type_map.get(type_name)
+        if ref_type is not None:
+            extract_children(ref_type, root_xpath, results, type_map)
+    else:
+        ct = element.find("xs:complexType", NS)
+        if ct is not None:
+            extract_children(ct, root_xpath, results, type_map)
 
-    # Write to Excel
+    # Save to Excel
     df = pd.DataFrame(results, columns=[
         "XPath", "Data Type", "Range", "Pattern", "Length", "Sample", "Mandatory/Optional"
     ])
@@ -127,6 +153,6 @@ def process_xsd(xsd_path, output_excel):
     print(f"✅ Extraction complete. Output saved to: {output_excel}")
 
 # Example usage
-xsd_file = "your_file.xsd"          # Replace with your actual XSD path
-output_file = "xpaths_output.xlsx"  # Desired Excel file
+xsd_file = "your_file.xsd"           # Update this
+output_file = "xpaths_output.xlsx"   # Desired output
 process_xsd(xsd_file, output_file)
