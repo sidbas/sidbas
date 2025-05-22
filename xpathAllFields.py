@@ -27,11 +27,18 @@ def extract_children(element, path, results, type_map):
             pattern = ""
             length = ""
 
-            restriction = child.find(".//xs:restriction", NS)
+            # Look for restriction via inline xs:simpleType or referenced restriction
+            restriction = None
+            simple_type = child.find("xs:simpleType", NS)
+            if simple_type is not None:
+                restriction = simple_type.find("xs:restriction", NS)
+            else:
+                restriction = child.find(".//xs:restriction", NS)
+
             if restriction is not None:
                 data_type = restriction.attrib.get("base", data_type)
 
-                # Capture min/max range constraints
+                # Capture range info
                 parts = []
                 for tag in ["minInclusive", "maxInclusive", "minExclusive", "maxExclusive"]:
                     for val in restriction.findall(f"xs:{tag}", NS):
@@ -43,7 +50,7 @@ def extract_children(element, path, results, type_map):
                 if pattern_el is not None:
                     pattern = pattern_el.attrib.get("value", "")
 
-                # Capture length-related constraints
+                # Capture length constraints
                 length_parts = []
                 for tag in ["length", "minLength", "maxLength"]:
                     val = restriction.find(f"xs:{tag}", NS)
@@ -61,16 +68,16 @@ def extract_children(element, path, results, type_map):
                 "Mandatory/Optional": mandatory
             })
 
-            # Recursively process nested inline complexType
+            # Recursively process inline complexTypes
             nested_complex = child.find("xs:complexType", NS)
             if nested_complex is not None:
                 extract_children(nested_complex, xpath, results, type_map)
 
-            # Process referenced type
+            # Handle referenced types
             elif "type" in child.attrib:
                 ref_type = child.attrib["type"]
                 if ":" in ref_type:
-                    ref_type = ref_type.split(":")[1]  # remove namespace
+                    ref_type = ref_type.split(":")[1]  # Remove namespace prefix
                 if ref_type in type_map:
                     extract_children(type_map[ref_type], xpath, results, type_map)
 
@@ -81,7 +88,7 @@ def process_xsd(xsd_path, output_excel):
 
     type_map = collect_complex_types(root)
 
-    # Start only from /Document element
+    # Only process /Document element
     element = root.find("xs:element[@name='Document']", NS)
     if element is None:
         print("❌ Root element 'Document' not found.")
@@ -101,7 +108,7 @@ def process_xsd(xsd_path, output_excel):
         "Mandatory/Optional": "Mandatory"
     })
 
-    # Recurse from root complexType
+    # Recurse from root's complexType
     complex_type = element.find("xs:complexType", NS)
     if complex_type is not None:
         extract_children(complex_type, root_xpath, results, type_map)
@@ -112,7 +119,7 @@ def process_xsd(xsd_path, output_excel):
         if ref_type in type_map:
             extract_children(type_map[ref_type], root_xpath, results, type_map)
 
-    # Save to Excel
+    # Write to Excel
     df = pd.DataFrame(results, columns=[
         "XPath", "Data Type", "Range", "Pattern", "Length", "Sample", "Mandatory/Optional"
     ])
@@ -120,6 +127,6 @@ def process_xsd(xsd_path, output_excel):
     print(f"✅ Extraction complete. Output saved to: {output_excel}")
 
 # Example usage
-xsd_file = "your_file.xsd"         # Replace with your XSD file path
-output_file = "xpaths_output.xlsx" # Desired Excel output path
+xsd_file = "your_file.xsd"          # Replace with your actual XSD path
+output_file = "xpaths_output.xlsx"  # Desired Excel file
 process_xsd(xsd_file, output_file)
