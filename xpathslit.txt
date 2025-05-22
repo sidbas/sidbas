@@ -1,0 +1,155 @@
+import streamlit as st
+from st_aggrid import AgGrid, GridOptionsBuilder
+import pandas as pd
+import tempfile
+import xml.etree.ElementTree as ET
+
+NS = {'xs': 'http://www.w3.org/2001/XMLSchema'}
+
+# --- Helper functions unchanged except updated result dictionaries ---
+# Only include: XPath, Data Type, Pattern, Length, Mandatory/Optional
+
+def collect_type_definitions(root):
+    type_map = {}
+    for t in root.findall(".//xs:complexType", NS) + root.findall(".//xs:simpleType", NS):
+        name = t.attrib.get("name")
+        if name:
+            type_map[name] = t
+    return type_map
+
+def extract_restrictions(type_element):
+    data_type = ""
+    pattern = ""
+    length = ""
+
+    restriction = type_element.find("xs:restriction", NS)
+    if restriction is not None:
+        data_type = restriction.attrib.get("base", "")
+
+        pattern_el = restriction.find("xs:pattern", NS)
+        if pattern_el is not None:
+            pattern = pattern_el.attrib.get("value", "")
+
+        length_parts = []
+        for tag in ["length", "minLength", "maxLength"]:
+            val = restriction.find(f"xs:{tag}", NS)
+            if val is not None:
+                length_parts.append(f"{tag}={val.attrib.get('value')}")
+        length = ", ".join(length_parts)
+
+    return data_type, pattern, length
+
+def extract_children(element, path, results, type_map):
+    sequence = element.find("xs:sequence", NS)
+    if sequence is not None:
+        for child in sequence.findall("xs:element", NS):
+            name = child.attrib.get("name")
+            if not name:
+                continue
+
+            xpath = f"{path}/{name}"
+            min_occurs = child.attrib.get("minOccurs", "1")
+            mandatory = "Mandatory" if min_occurs != "0" else "Optional"
+            data_type = child.attrib.get("type", "")
+            pattern = ""
+            length = ""
+
+            simple_type = child.find("xs:simpleType", NS)
+            if simple_type is not None:
+                data_type, pattern, length = extract_restrictions(simple_type)
+            elif child.find("xs:complexType", NS) is not None:
+                results.append({
+                    "XPath": xpath,
+                    "Data Type": "complexType",
+                    "Pattern": "",
+                    "Length": "",
+                    "Mandatory/Optional": mandatory
+                })
+                extract_children(child.find("xs:complexType", NS), xpath, results, type_map)
+                continue
+            elif data_type:
+                type_name = data_type.split(":")[-1]
+                ref_type = type_map.get(type_name)
+                if ref_type is not None:
+                    if ref_type.tag.endswith("simpleType"):
+                        data_type, pattern, length = extract_restrictions(ref_type)
+                    elif ref_type.tag.endswith("complexType"):
+                        results.append({
+                            "XPath": xpath,
+                            "Data Type": "complexType",
+                            "Pattern": "",
+                            "Length": "",
+                            "Mandatory/Optional": mandatory
+                        })
+                        extract_children(ref_type, xpath, results, type_map)
+                        continue
+
+            results.append({
+                "XPath": xpath,
+                "Data Type": data_type or "complexType",
+                "Pattern": pattern,
+                "Length": length,
+                "Mandatory/Optional": mandatory
+            })
+
+def process_xsd(file_object):
+    tree = ET.parse(file_object)
+    root = tree.getroot()
+    results = []
+
+    type_map = collect_type_definitions(root)
+    element = root.find("xs:element[@name='Document']", NS)
+    if element is None:
+        st.error("❌ Root element 'Document' not found.")
+        return None
+
+    root_xpath = "/Document"
+    results.append({
+        "XPath": root_xpath,
+        "Data Type": element.attrib.get("type", "complexType"),
+        "Pattern": "",
+        "Length": "",
+        "Mandatory/Optional": "Mandatory"
+    })
+
+    if "type" in element.attrib:
+        type_name = element.attrib["type"].split(":")[-1]
+        ref_type = type_map.get(type_name)
+        if ref_type is not None:
+            extract_children(ref_type, root_xpath, results, type_map)
+    else:
+        ct = element.find("xs:complexType", NS)
+        if ct is not None:
+            extract_children(ct, root_xpath, results, type_map)
+
+    return pd.DataFrame(results)
+
+# --- Streamlit UI ---
+
+st.title("🧾 XSD XPath Extractor (Streamlit)")
+
+uploaded_file = st.file_uploader("Upload your XSD file", type=["xsd"])
+
+if uploaded_file:
+    with tempfile.NamedTemporaryFile(delete=False, suffix=".xsd") as tmp:
+        tmp.write(uploaded_file.read())
+        tmp_path = tmp.name
+
+    df = process_xsd(tmp_path)
+
+    if df is not None:
+        st.success("✅ XPaths extracted successfully!")
+
+        gb = GridOptionsBuilder.from_dataframe(df)
+        gb.configure_default_column(editable=False, filter=True, resizable=True, sortable=True)
+        gb.configure_pagination()
+        grid_options = gb.build()
+
+        st.write("### Extracted Data")
+        AgGrid(df, gridOptions=grid_options, fit_columns_on_grid_load=True)
+
+        # Excel Download
+        excel_bytes = df.to_excel(index=False, engine='openpyxl')
+        st.download_button("📥 Download as Excel", data=excel_bytes,
+                           file_name="xpaths_output.xlsx",
+                           mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
