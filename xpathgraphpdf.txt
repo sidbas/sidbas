@@ -1,0 +1,66 @@
+from graphviz import Digraph
+
+def generate_xpath_tree(df):
+    dot = Digraph(comment="XSD XPath Tree")
+    dot.attr('node', shape='box', style='filled', color='lightblue2', fontname="Helvetica")
+
+    added_nodes = set()
+
+    for xpath in df['XPath']:
+        parts = xpath.strip("/").split("/")
+        for i in range(1, len(parts) + 1):
+            node = "/".join(parts[:i])
+            parent = "/".join(parts[:i - 1]) if i > 1 else ""
+            if node not in added_nodes:
+                dot.node(node, label=parts[i - 1])
+                added_nodes.add(node)
+            if parent and parent in added_nodes:
+                dot.edge(parent, node)
+
+    return dot
+
+st.write("### 📊 XPath Hierarchical Graph")
+
+dot = generate_xpath_tree(df)
+
+# Render to PNG
+graph_image_path = tempfile.mktemp(suffix=".png")
+dot.render(graph_image_path, format="png", cleanup=True)
+
+# Show the image in Streamlit
+st.image(graph_image_path + ".png", caption="XPath Tree")
+
+# Provide download button
+with open(graph_image_path + ".png", "rb") as f:
+    st.download_button("📥 Download Tree Image", data=f, file_name="xpath_tree.png", mime="image/png")
+
+# Generate and render PDF
+graph_pdf_path = tempfile.mktemp(suffix=".pdf")
+dot.render(graph_pdf_path, format="pdf", cleanup=True)
+
+# Offer download of the PDF file
+with open(graph_pdf_path + ".pdf", "rb") as f:
+    st.download_button("📄 Download Tree as PDF", data=f, file_name="xpath_tree.pdf", mime="application/pdf")
+
+
+replace
+--png
+graph_image_path = tempfile.mktemp(suffix=".png")
+dot.render(graph_image_path, format="png", cleanup=True)
+
+st.image(graph_image_path + ".png", caption="XPath Tree")
+
+with open(graph_image_path + ".png", "rb") as f:
+    st.download_button("📥 Download Tree Image", data=f, file_name="xpath_tree.png", mime="image/png")
+
+--pdf
+graph_pdf_path = tempfile.mktemp(suffix=".pdf")
+dot.render(graph_pdf_path, format="pdf", cleanup=True)
+
+# PDF download
+with open(graph_pdf_path + ".pdf", "rb") as f:
+    st.download_button("📄 Download Tree as PDF", data=f, file_name="xpath_tree.pdf", mime="application/pdf")
+
+
+
+
