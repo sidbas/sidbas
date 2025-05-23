@@ -81,5 +81,35 @@ def generate_xpath_tree(df):
 
     return dot
 
+from graphviz import Digraph
+
+def generate_xpath_tree(df):
+    dot = Digraph(comment="XSD XPath Tree")
+
+    # Layout config
+    dot.attr(rankdir='TB')                 # Top to bottom layout
+    dot.attr(nodesep='0.6')                # Horizontal space between sibling nodes
+    dot.attr(ranksep='1.0', splines='true')# Vertical spacing and cleaner lines
+    dot.attr('graph', dpi='150')           # Higher DPI for clarity
+    dot.attr(size='10,12')                 # Optional: larger canvas
+
+    # Node appearance
+    dot.attr('node', shape='box', style='filled', color='lightblue2', fontname="Helvetica")
+
+    added_nodes = set()
+
+    for xpath in df['XPath']:
+        parts = xpath.strip("/").split("/")
+        for i in range(1, len(parts) + 1):
+            node = "/".join(parts[:i])
+            parent = "/".join(parts[:i - 1]) if i > 1 else ""
+            if node not in added_nodes:
+                dot.node(node, label=parts[i - 1])
+                added_nodes.add(node)
+            if parent and parent in added_nodes:
+                dot.edge(parent, node)
+
+    return dot
+
 
 
