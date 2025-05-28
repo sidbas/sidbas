@@ -91,3 +91,28 @@ Function MaskAsteriskWords(text As String) As String
 
     MaskAsteriskWords = result
 End Function
+
+
+Function MaskInsideAsterisks(ByVal text As String) As String
+    Dim i As Long
+    Dim inAsterisk As Boolean
+    Dim result As String
+    Dim ch As String
+
+    result = ""
+    inAsterisk = False
+
+    For i = 1 To Len(text)
+        ch = Mid(text, i, 1)
+        If ch = "*" Then
+            inAsterisk = Not inAsterisk
+            result = result & "*"
+        ElseIf inAsterisk Then
+            result = result & "X"
+        Else
+            result = result & ch
+        End If
+    Next i
+
+    MaskInsideAsterisks = result
+End Function
