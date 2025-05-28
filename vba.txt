@@ -1,3 +1,22 @@
+import re
+
+def mask_between_asterisks(text):
+    # This pattern matches anything between two asterisks: *text*
+    pattern = re.compile(r'\*([^*]+)\*')
+
+    # Replace the matched group with same-length Xs, wrapped in asterisks
+    def replacer(match):
+        inner = match.group(1)
+        return f"*{'X' * len(inner)}*"
+
+    return pattern.sub(replacer, text)
+
+# Example usage
+sample = "|||ALL|||*SAUDI*RITZ*DSC*GOV*SA*|N|||"
+masked = mask_between_asterisks(sample)
+print(masked)
+
+
 
 Function MaskBetweenAsterisksRegex(inputText As String) As String
     Dim regEx As Object
