@@ -1,3 +1,42 @@
+
+Function MaskPairedAsteriskWords(text As String) As String
+    Dim asteriskPos() As Long
+    Dim count As Long
+    Dim i As Long
+    Dim startPos As Long
+    Dim endPos As Long
+    Dim output As String
+    
+    ' Step 1: Find all asterisk positions
+    For i = 1 To Len(text)
+        If Mid(text, i, 1) = "*" Then
+            count = count + 1
+            ReDim Preserve asteriskPos(1 To count)
+            asteriskPos(count) = i
+        End If
+    Next i
+    
+    output = text
+    
+    ' Step 2: Mask each pair of asterisks
+    For i = 1 To count - 1 Step 2
+        startPos = asteriskPos(i)
+        endPos = asteriskPos(i + 1)
+        
+        Dim middleLen As Long
+        middleLen = endPos - startPos - 1
+        
+        If middleLen > 0 Then
+            output = Left(output, startPos) & _
+                     String(middleLen, "X") & _
+                     Mid(output, endPos)
+        End If
+    Next i
+    
+    MaskPairedAsteriskWords = output
+End Function
+
+
  Function ReplaceAsteriskText(inputText As String) As String
     Dim regex As Object
     Set regex = CreateObject("VBScript.RegExp")
