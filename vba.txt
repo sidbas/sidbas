@@ -1,4 +1,4 @@
-Function ReplaceAsteriskText(inputText As String) As String
+ Function ReplaceAsteriskText(inputText As String) As String
     Dim regex As Object
     Set regex = CreateObject("VBScript.RegExp")
     
@@ -43,3 +43,28 @@ Function MaskAsteriskWords(text As String) As String
 
     MaskAsteriskWords = result
 End Function
+
+Function MaskAsteriskWords(text As String) As String
+    Dim result As String
+    Dim startPos As Long
+    Dim endPos As Long
+    Dim tempText As String
+
+    result = text
+    startPos = InStr(1, result, "*")
+
+    Do While startPos > 0
+        endPos = InStr(startPos + 1, result, "*")
+        If endPos = 0 Then Exit Do
+
+        tempText = Mid(result, startPos + 1, endPos - startPos - 1)
+        If Len(tempText) > 0 Then
+            result = Left(result, startPos) & String(Len(tempText), "X") & Mid(result, endPos)
+        End If
+
+        startPos = InStr(endPos + 1, result, "*")
+    Loop
+
+    MaskAsteriskWords = result
+End Function
+
