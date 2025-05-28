@@ -1,5 +1,17 @@
 import re
 
+def mask_all_between_asterisks(text):
+    # Match everything between two asterisks: *...*
+    return re.sub(r'\*([^*]*)\*', lambda m: '*' + 'X' * len(m.group(1)) + '*', text)
+
+# Example usage
+sample = "|||ALL|||*SAUDI*RITZ*DSC*GOV*SA*|N|||"
+masked = mask_all_between_asterisks(sample)
+print(masked)
+
+
+import re
+
 def mask_between_asterisks(text):
     # This pattern matches anything between two asterisks: *text*
     pattern = re.compile(r'\*([^*]+)\*')
