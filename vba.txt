@@ -1,3 +1,29 @@
+
+Function MaskBetweenAsterisksRegex(inputText As String) As String
+    Dim regEx As Object
+    Dim matches As Object
+    Dim match As Object
+    Dim maskedText As String
+    Dim i As Integer
+
+    Set regEx = CreateObject("VBScript.RegExp")
+    regEx.Global = True
+    regEx.IgnoreCase = True
+    regEx.Pattern = "\*([^*]+)\*"
+
+    Do While regEx.Test(inputText)
+        Set matches = regEx.Execute(inputText)
+        For Each match In matches
+            Dim innerText As String
+            innerText = match.SubMatches(0)
+            maskedText = "*" & String(Len(innerText), "X") & "*"
+            inputText = Replace(inputText, match.Value, maskedText, , 1)
+        Next
+    Loop
+
+    MaskBetweenAsterisksRegex = inputText
+End Function
+
 Function MaskBetweenEachAsteriskPair(txt As String) As String
     Dim i As Long
     Dim asteriskCount As Long
