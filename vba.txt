@@ -1,0 +1,9 @@
+Function ReplaceAsteriskText(inputText As String) As String
+    Dim regex As Object
+    Set regex = CreateObject("VBScript.RegExp")
+    
+    regex.Pattern = "\*[^*]*\*"
+    regex.Global = True
+    
+    ReplaceAsteriskText = regex.Replace(inputText, "XXX")
+End Function
