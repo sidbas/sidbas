@@ -1,3 +1,29 @@
+Function MaskAllWordsBetweenAsterisks(ByVal txt As String) As String
+    Dim i As Long
+    Dim insideAsterisk As Boolean
+    Dim result As String
+    Dim ch As String
+    
+    insideAsterisk = False
+    result = ""
+    
+    For i = 1 To Len(txt)
+        ch = Mid(txt, i, 1)
+        
+        If ch = "*" Then
+            insideAsterisk = Not insideAsterisk
+            result = result & "*"
+        ElseIf insideAsterisk Then
+            result = result & "X"
+        Else
+            result = result & ch
+        End If
+    Next i
+    
+    MaskAllWordsBetweenAsterisks = result
+End Function
+
+
 
 Function MaskPairedAsteriskWords(text As String) As String
     Dim asteriskPos() As Long
