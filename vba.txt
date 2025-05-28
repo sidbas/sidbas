@@ -19,3 +19,27 @@ Function ReplaceAllAsteriskSections(inputText As String) As String
     
     ReplaceAllAsteriskSections = regex.Replace(inputText, "XXX")
 End Function
+
+Function MaskAsteriskWords(text As String) As String
+    Dim result As String
+    Dim i As Integer
+    Dim inAsterisk As Boolean
+    Dim ch As String
+
+    inAsterisk = False
+    result = ""
+
+    For i = 1 To Len(text)
+        ch = Mid(text, i, 1)
+        If ch = "*" Then
+            inAsterisk = Not inAsterisk
+            result = result & "*"
+        ElseIf inAsterisk Then
+            result = result & "X"
+        Else
+            result = result & ch
+        End If
+    Next i
+
+    MaskAsteriskWords = result
+End Function
