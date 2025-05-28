@@ -68,3 +68,26 @@ Function MaskAsteriskWords(text As String) As String
     MaskAsteriskWords = result
 End Function
 
+Function MaskAsteriskWords(text As String) As String
+    Dim result As String
+    Dim pos As Long
+    Dim inAsterisk As Boolean
+    Dim ch As String
+
+    result = ""
+    inAsterisk = False
+
+    For pos = 1 To Len(text)
+        ch = Mid(text, pos, 1)
+        If ch = "*" Then
+            inAsterisk = Not inAsterisk
+            result = result & "*"
+        ElseIf inAsterisk Then
+            result = result & "X"
+        Else
+            result = result & ch
+        End If
+    Next pos
+
+    MaskAsteriskWords = result
+End Function
