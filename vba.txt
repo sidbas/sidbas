@@ -1,3 +1,37 @@
+import pandas as pd
+import re
+
+# --- Masking functions ---
+def mask_every_star_enclosed_word(text):
+    return re.sub(r'\*[^*]+\*', lambda m: '*' + 'X' * (len(m.group(0)) - 2) + '*', text)
+
+def mask_trailing_star_words(text):
+    return re.sub(r'(?<=\*)[^\*]+\*', lambda m: 'X' * (len(m.group(0)) - 1) + '*', text)
+
+def mask_all_starred_words(text):
+    if pd.isna(text):
+        return text  # handle NaNs gracefully
+    return mask_trailing_star_words(mask_every_star_enclosed_word(str(text)))
+
+# --- Load Excel file ---
+input_file = 'data.xlsx'           # ← Your source Excel file
+output_file = 'masked_data.xlsx'   # ← Result file
+column_to_mask = 'YourColumnName'  # ← Replace with your actual column header
+
+df = pd.read_excel(input_file)
+
+# --- Apply masking ---
+df[column_to_mask] = df[column_to_mask].apply(mask_all_starred_words)
+
+# --- Save the masked output ---
+df.to_excel(output_file, index=False)
+
+print(f"Masked data saved to '{output_file}'")
+
+
+
+
+
 import re
 
 def mask_every_star_enclosed_word(text):
