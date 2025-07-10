@@ -1,0 +1,12 @@
+
+
+Canel case
+
+=LET(
+  txt, A1,
+  words, TEXTSPLIT(LOWER(txt), " "),
+  first, INDEX(words, 1),
+  rest, IFERROR(MID(UPPER(words), 1, 1) & MID(words, 2, LEN(words)), ""),
+  camel, first & TEXTJOIN("", , INDEX(rest, SEQUENCE(ROWS(words)-1)+1)),
+  camel
+)
