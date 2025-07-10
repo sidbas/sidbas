@@ -10,3 +10,20 @@ Canel case
   camel, first & TEXTJOIN("", , INDEX(rest, SEQUENCE(ROWS(words)-1)+1)),
   camel
 )
+
+Function ToCamelCase(text As String) As String
+    Dim words() As String
+    Dim i As Integer
+    Dim result As String
+
+    words = Split(LCase(text), " ")
+
+    If UBound(words) >= 0 Then
+        result = words(0)
+        For i = 1 To UBound(words)
+            result = result & UCase(Left(words(i), 1)) & Mid(words(i), 2)
+        Next i
+    End If
+
+    ToCamelCase = result
+End Function
