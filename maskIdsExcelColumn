@@ -1,23 +1,27 @@
-def mask_numeric_columns_in_all_sheets(file_path, columns_to_mask, output_file):
-    all_sheets = pd.read_excel(file_path, sheet_name=None)
+import math
+import random
+import string
 
-    updated_sheets = {}
+def mask_digits_only(s):
+    return ''.join(random.choice(string.digits) if ch.isdigit() else ch for ch in s)
 
-    for sheet_name, df in all_sheets.items():
-        print(f"\n📄 Processing sheet: {sheet_name}")
-        df.columns = df.columns.str.strip()
+def mask_numeric_value(val):
+    if pd.isnull(val):
+        return val
 
-        for col in columns_to_mask:
-            if col in df.columns:
-                print(f"🔢 Masking numeric values in column: {col}")
-                df[col] = df[col].apply(mask_numeric_value)
-            else:
-                print(f"⚠️ Column '{col}' not found in sheet '{sheet_name}'")
+    # Handle numeric types directly
+    if isinstance(val, (int, float)):
+        if isinstance(val, float) and not val.is_integer():
+            # It's a real float, keep decimal part
+            val_str = str(val)
+        else:
+            # It's an int or a float like 123.0 — treat as int
+            val_str = str(int(val))
+    else:
+        val_str = str(val).strip()
 
-        updated_sheets[sheet_name] = df
+        # If it's not all digits (e.g., "abc", "123a") — don't mask
+        if not val_str.replace('.', '', 1).replace('-', '', 1).isdigit():
+            return val
 
-    with pd.ExcelWriter(output_file, engine='openpyxl') as writer:
-        for sheet_name, df in updated_sheets.items():
-            df.to_excel(writer, sheet_name=sheet_name, index=False)
-
-    print(f"\n✅ Clean numeric masking done. Output saved to: {output_file}")
+    return mask_digits_only(val_str)
