@@ -1,0 +1,27 @@
+import pandas as pd
+import random
+import string
+
+def generate_random_string(length):
+    chars = string.ascii_letters + string.digits  # A-Z, a-z, 0-9
+    return ''.join(random.choice(chars) for _ in range(length))
+
+def mask_with_random_chars(val):
+    if pd.isnull(val):
+        return val
+    try:
+        val_str = str(int(float(val)))  # Treat value as numeric string
+        return generate_random_string(len(val_str))
+    except:
+        return val  # Keep non-numeric values unchanged
+
+def mask_column_with_random_chars(file_path, column_name, output_file):
+    df = pd.read_excel(file_path)
+
+    if column_name not in df.columns:
+        raise ValueError(f"Column '{column_name}' not found.")
+
+    df[column_name] = df[column_name].apply(mask_with_random_chars)
+
+    df.to_excel(output_file, index=False)
+    print(f"Masked Excel saved to: {output_file}")
