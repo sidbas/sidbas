@@ -2,19 +2,29 @@ import pandas as pd
 import random
 import string
 
-def generate_random_string(length):
-    chars = string.ascii_letters + string.digits
-    return ''.join(random.choice(chars) for _ in range(length))
-
-def mask_any_value(val):
+def mask_numeric_value(val):
     if pd.isnull(val):
         return val
-    val_str = str(val).strip()
-    if not val_str:
-        return val
-    return generate_random_string(len(val_str))
 
-def mask_columns_in_all_sheets(file_path, columns_to_mask, output_file):
+    val_str = str(val).strip()
+
+    # Check if it's numeric (pure digits or float)
+    try:
+        float(val_str)
+        is_numeric = True
+    except:
+        is_numeric = False
+
+    if is_numeric:
+        # Replace digits with random digits, keep non-digit chars (like . or -)
+        return ''.join(
+            random.choice(string.digits) if ch.isdigit() else ch
+            for ch in val_str
+        )
+    else:
+        return val  # Leave alphanumerics unchanged
+
+def mask_numeric_columns_in_all_sheets(file_path, columns_to_mask, output_file):
     all_sheets = pd.read_excel(file_path, sheet_name=None)
 
     updated_sheets = {}
@@ -25,8 +35,8 @@ def mask_columns_in_all_sheets(file_path, columns_to_mask, output_file):
 
         for col in columns_to_mask:
             if col in df.columns:
-                print(f"🔐 Masking column: {col}")
-                df[col] = df[col].apply(mask_any_value)
+                print(f"🔢 Masking numeric values in column: {col}")
+                df[col] = df[col].apply(mask_numeric_value)
             else:
                 print(f"⚠️ Column '{col}' not found in sheet '{sheet_name}'")
 
@@ -36,4 +46,4 @@ def mask_columns_in_all_sheets(file_path, columns_to_mask, output_file):
         for sheet_name, df in updated_sheets.items():
             df.to_excel(writer, sheet_name=sheet_name, index=False)
 
-    print(f"\n✅ Masked Excel saved to: {output_file}")
+    print(f"\n✅ Numeric masking complete. Output saved to: {output_file}")
