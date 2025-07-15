@@ -15,31 +15,31 @@ def mask_with_random_chars(val):
     except:
         return val
 
-def mask_column_in_all_sheets(file_path, column_name, output_file):
+def mask_columns_in_all_sheets(file_path, columns_to_mask, output_file):
     # Read all sheets
     all_sheets = pd.read_excel(file_path, sheet_name=None)
 
-    # Dict to store updated dataframes
     updated_sheets = {}
 
     for sheet_name, df in all_sheets.items():
-        print(f"Processing sheet: {sheet_name}")
+        print(f"\n📄 Processing sheet: {sheet_name}")
 
-        # Clean column names
+        # Normalize column names
         df.columns = df.columns.str.strip()
 
-        if column_name in df.columns:
-            print(f"Masking column '{column_name}' in sheet '{sheet_name}'")
-            df[column_name] = df[column_name].apply(mask_with_random_chars)
-        else:
-            print(f"Column '{column_name}' not found in sheet '{sheet_name}'")
+        # Mask each requested column if it exists
+        for col in columns_to_mask:
+            if col in df.columns:
+                print(f"🔐 Masking column: {col}")
+                df[col] = df[col].apply(mask_with_random_chars)
+            else:
+                print(f"⚠️ Column '{col}' not found in sheet '{sheet_name}'")
 
-        # Save updated DataFrame to dictionary
         updated_sheets[sheet_name] = df
 
-    # Write all sheets back to a single Excel file
+    # Save updated sheets to new Excel
     with pd.ExcelWriter(output_file, engine='openpyxl') as writer:
         for sheet_name, df in updated_sheets.items():
             df.to_excel(writer, sheet_name=sheet_name, index=False)
 
-    print(f"\n✅ Masked Excel saved to: {output_file}")
+    print(f"\n✅ All matching columns masked. Output saved to: {output_file}")
