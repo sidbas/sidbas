@@ -1,3 +1,22 @@
+import re
+import random
+import string
+import pandas as pd
+
+def random_digits(length):
+    return ''.join(random.choice(string.digits) for _ in range(length))
+
+def mask_numbers_inside_text(val):
+    if pd.isnull(val):
+        return val
+
+    val_str = str(val).strip()
+
+    # Replace all digit sequences (e.g. "123", "0001") with random digits
+    masked = re.sub(r'\d+', lambda m: random_digits(len(m.group())), val_str)
+    return masked
+
+
 def mask_columns_with_embedded_numbers(file_path, columns_to_mask, output_file):
     all_sheets = pd.read_excel(file_path, sheet_name=None)
     updated_sheets = {}
