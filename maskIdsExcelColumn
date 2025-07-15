@@ -6,40 +6,34 @@ def generate_random_string(length):
     chars = string.ascii_letters + string.digits
     return ''.join(random.choice(chars) for _ in range(length))
 
-def mask_with_random_chars(val):
+def mask_any_value(val):
     if pd.isnull(val):
         return val
-    try:
-        val_str = str(int(float(val)))  # Convert numeric to string
-        return generate_random_string(len(val_str))
-    except:
+    val_str = str(val).strip()
+    if not val_str:
         return val
+    return generate_random_string(len(val_str))
 
 def mask_columns_in_all_sheets(file_path, columns_to_mask, output_file):
-    # Read all sheets
     all_sheets = pd.read_excel(file_path, sheet_name=None)
 
     updated_sheets = {}
 
     for sheet_name, df in all_sheets.items():
         print(f"\n📄 Processing sheet: {sheet_name}")
-
-        # Normalize column names
         df.columns = df.columns.str.strip()
 
-        # Mask each requested column if it exists
         for col in columns_to_mask:
             if col in df.columns:
                 print(f"🔐 Masking column: {col}")
-                df[col] = df[col].apply(mask_with_random_chars)
+                df[col] = df[col].apply(mask_any_value)
             else:
                 print(f"⚠️ Column '{col}' not found in sheet '{sheet_name}'")
 
         updated_sheets[sheet_name] = df
 
-    # Save updated sheets to new Excel
     with pd.ExcelWriter(output_file, engine='openpyxl') as writer:
         for sheet_name, df in updated_sheets.items():
             df.to_excel(writer, sheet_name=sheet_name, index=False)
 
-    print(f"\n✅ All matching columns masked. Output saved to: {output_file}")
+    print(f"\n✅ Masked Excel saved to: {output_file}")
