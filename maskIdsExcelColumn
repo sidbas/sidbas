@@ -10,22 +10,36 @@ def mask_with_random_chars(val):
     if pd.isnull(val):
         return val
     try:
-        val_str = str(int(float(val)))
+        val_str = str(int(float(val)))  # Convert numeric to string
         return generate_random_string(len(val_str))
     except:
         return val
 
-def mask_column_with_random_chars(file_path, column_name, output_file):
-    df = pd.read_excel(file_path)
+def mask_column_in_all_sheets(file_path, column_name, output_file):
+    # Read all sheets
+    all_sheets = pd.read_excel(file_path, sheet_name=None)
 
-    # Clean column names
-    df.columns = df.columns.str.strip()
+    # Dict to store updated dataframes
+    updated_sheets = {}
 
-    print("Available columns:", df.columns.tolist())  # Debug line
+    for sheet_name, df in all_sheets.items():
+        print(f"Processing sheet: {sheet_name}")
 
-    if column_name not in df.columns:
-        raise ValueError(f"Column '{column_name}' not found. Did you mean one of: {df.columns.tolist()}")
+        # Clean column names
+        df.columns = df.columns.str.strip()
 
-    df[column_name] = df[column_name].apply(mask_with_random_chars)
-    df.to_excel(output_file, index=False)
-    print(f"Masked Excel saved to: {output_file}")
+        if column_name in df.columns:
+            print(f"Masking column '{column_name}' in sheet '{sheet_name}'")
+            df[column_name] = df[column_name].apply(mask_with_random_chars)
+        else:
+            print(f"Column '{column_name}' not found in sheet '{sheet_name}'")
+
+        # Save updated DataFrame to dictionary
+        updated_sheets[sheet_name] = df
+
+    # Write all sheets back to a single Excel file
+    with pd.ExcelWriter(output_file, engine='openpyxl') as writer:
+        for sheet_name, df in updated_sheets.items():
+            df.to_excel(writer, sheet_name=sheet_name, index=False)
+
+    print(f"\n✅ Masked Excel saved to: {output_file}")
