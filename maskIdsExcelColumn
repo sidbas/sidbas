@@ -1,29 +1,3 @@
-import pandas as pd
-import random
-import string
-
-def mask_numeric_value(val):
-    if pd.isnull(val):
-        return val
-
-    val_str = str(val).strip()
-
-    # Check if it's numeric (pure digits or float)
-    try:
-        float(val_str)
-        is_numeric = True
-    except:
-        is_numeric = False
-
-    if is_numeric:
-        # Replace digits with random digits, keep non-digit chars (like . or -)
-        return ''.join(
-            random.choice(string.digits) if ch.isdigit() else ch
-            for ch in val_str
-        )
-    else:
-        return val  # Leave alphanumerics unchanged
-
 def mask_numeric_columns_in_all_sheets(file_path, columns_to_mask, output_file):
     all_sheets = pd.read_excel(file_path, sheet_name=None)
 
@@ -46,4 +20,4 @@ def mask_numeric_columns_in_all_sheets(file_path, columns_to_mask, output_file):
         for sheet_name, df in updated_sheets.items():
             df.to_excel(writer, sheet_name=sheet_name, index=False)
 
-    print(f"\n✅ Numeric masking complete. Output saved to: {output_file}")
+    print(f"\n✅ Clean numeric masking done. Output saved to: {output_file}")
