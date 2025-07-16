@@ -84,7 +84,94 @@ def mask_columns_across_sheets(file_path, columns_to_mask, output_file):
             df.to_excel(writer, sheet_name=sheet_name, index=False)
 
     print(f"\n✅ Deterministic masking complete. Output saved to: {output_file}")
+
+
+columns_to_mask = ["PhoneNumber", "SSN", "Email", "CardNumber", "UserID", "TaxID"]
+
+mask_columns_across_sheets(
+    file_path="input_data.xlsx",
+    columns_to_mask=columns_to_mask,
+    output_file="masked_output.xlsx"
+)
+
+
+#
+Perfect — if you want to encrypt instead of mask, we can use AES encryption to secure the data reversibly (unlike masking). That means:
+	•	🔐 You can later decrypt the values (with the same key)
+	•	💡 Useful for secure testing, reversible transformations, or audit trails
+# pip install cryptography
+
+from cryptography.hazmat.primitives.ciphers.aead import AESGCM
+import os
+import base64
+
+# Generate a 256-bit key securely (do this once and save safely)
+# Use os.urandom(32) and store securely in env/file
+ENCRYPTION_KEY = b"your-32-byte-long-key.............."  # Must be 32 bytes
+
+def encrypt_value(value, key=ENCRYPTION_KEY):
+    if pd.isnull(value):
+        return value
+    val_str = str(value).encode('utf-8')
+    nonce = os.urandom(12)  # AESGCM requires 96-bit nonce
+    aesgcm = AESGCM(key)
+    encrypted = aesgcm.encrypt(nonce, val_str, None)
+    combined = nonce + encrypted
+    return base64.b64encode(combined).decode('utf-8')
+
+def decrypt_value(encoded_value, key=ENCRYPTION_KEY):
+    if pd.isnull(encoded_value):
+        return encoded_value
+    decoded = base64.b64decode(encoded_value)
+    nonce, ciphertext = decoded[:12], decoded[12:]
+    aesgcm = AESGCM(key)
+    decrypted = aesgcm.decrypt(nonce, ciphertext, None)
+    return decrypted.decode('utf-8')
     
+
+custom_column_rules = {
+    "PhoneNumber": mask_keep_last_4_digits,
+    "SSN": mask_ssn,
+    "Email": mask_email,
+    "TaxID": lambda v: mask_regex_format(v, r'\d{2}-\d{7}', lambda m: 'XX-XXXXXXX'),
+    "CardNumber": lambda v: mask_regex_format(v, r'(\d{4})-(\d{4})-(\d{4})-(\d{4})', lambda m: f"{'****'}-{'****'}-{'****'}-{m.group(4)}"),
+    
+    # 🔐 Encrypt these:
+    "SecretNote": lambda v: encrypt_value(v),
+    "AccessKey": lambda v: encrypt_value(v),
+}
+
+
+def mask_value(val, column_name=None):
+    if pd.isnull(val):
+        return val
+
+    # Use custom column rule if defined
+    if column_name in custom_column_rules:
+        return custom_column_rules[column_name](val)
+
+    # Fallback: generic deterministic masking
+    val_str = str(val).strip()
+    seed = seed_from_value(val_str)
+    return mask_alphanumeric(val_str, seed)
+
+
+def decrypt_column(df, column_name):
+    df[column_name] = df[column_name].apply(decrypt_value)
+
+
+columns_to_mask_or_encrypt = [
+    "PhoneNumber", "SSN", "Email", "CardNumber", "UserID", "TaxID", "AccessKey", "SecretNote"
+]
+
+mask_columns_across_sheets(
+    file_path="input.xlsx",
+    columns_to_mask=columns_to_mask_or_encrypt,
+    output_file="output_encrypted.xlsx"
+)
+
+
+
     
 
 
