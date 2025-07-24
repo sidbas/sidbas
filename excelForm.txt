@@ -9,3 +9,7 @@
 
 =TRIM(RIGHT(A1,LEN(A1)-FIND(" ",A1&" ",FIND(" ",A1&" ",1)+1)))
 
+=TRIM(SUBSTITUTE(SUBSTITUTE(SUBSTITUTE(SUBSTITUTE(A1,"  "," "),"  "," "),"  "," "),"  "," "))
+=LEFT(B1,FIND(" ",B1)-1)
+=MID(B1,FIND(" ",B1)+1,FIND(" ",B1,FIND(" ",B1)+1)-FIND(" ",B1)-1)
+=RIGHT(B1,LEN(B1)-FIND(" ",B1,FIND(" ",B1)+1))
