@@ -1,0 +1,6 @@
+=TRIM(LEFT(A1,FIND(" ",A1&" ",1)))
+
+=TRIM(MID(A1,FIND(" ",A1&" ",1),FIND(" ",A1&" ",FIND(" ",A1&" ",1)+1)-FIND(" ",A1&" ",1)))
+
+=TRIM(RIGHT(A1,LEN(A1)-FIND(" ",A1&" ",FIND(" ",A1&" ",1)+1)))
+
