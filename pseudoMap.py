@@ -12,6 +12,90 @@ import re
 
 import re
 
+import re
+
+def normalize_text(text):
+    # Replace curly quotes with straight quotes
+    replacements = {
+        '‘': "'", '’': "'",
+        '“': '"', '”': '"'
+    }
+    for fancy, normal in replacements.items():
+        text = text.replace(fancy, normal)
+    return text
+
+def generate_functional_pseudocode(text):
+    if not text or not isinstance(text, str):
+        return "⚠️ Invalid or empty mapping"
+
+    text = normalize_text(text)
+    lines = [line.strip() for line in text.strip().splitlines() if line.strip()]
+    
+    joins = []
+    filters = []
+    target_field = None
+
+    in_join_block = False
+    in_filter_block = False
+
+    for line in lines:
+        l = line.lower()
+
+        # Detect section headers
+        if "by joining" in l:
+            in_join_block = True
+            in_filter_block = False
+            continue
+        elif any(kw in l for kw in ["when", "where", "based on the conditions", "if"]):
+            in_filter_block = True
+            in_join_block = False
+            # Don't skip the line itself — treat as a filter
+            if any(op in line.lower() for op in ["=", " in ", " like ", " is null", ">", "<"]):
+                filters.append(line)
+            continue
+        elif "populate" in l:
+            in_filter_block = False
+            in_join_block = False
+            continue
+
+        # Classify line content
+        if "=" in line or " in " in l or " like " in l or " is null" in l:
+            if bool(re.search(r"\w+\.\w+\s*=\s*\w+\.\w+", line)):  # Looks like a join
+                if in_join_block or not in_filter_block:
+                    joins.append(line)
+                else:
+                    filters.append(line)
+            else:
+                filters.append(line)
+        elif not target_field and re.match(r"^\w+\.\w+\.\w+$", line):
+            target_field = line
+
+    # Format output
+    output = []
+    step = 1
+
+    if joins:
+        output.append(f"{step}. Join tables on:")
+        for j in joins:
+            output.append(f"   - {j}")
+        step += 1
+
+    if filters:
+        output.append(f"{step}. Apply filter conditions:")
+        for f in filters:
+            output.append(f"   - {f}")
+        step += 1
+
+    if target_field:
+        output.append(f"{step}. Lookup and populate:")
+        output.append(f"   - Target field: {target_field}")
+    else:
+        output.append(f"{step}. Target field: ❓ Not found")
+
+    return "\n".join(output)
+
+
+
 def generate_functional_pseudocode(text):
     if not text or not isinstance(text, str):
         return "⚠️ Invalid or empty mapping"
