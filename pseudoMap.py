@@ -7,6 +7,50 @@ st.set_page_config(page_title="ETL Mapping to Pseudocode", layout="wide")
 st.title("🛠️ ETL Mapping to Functional Pseudocode")
 st.markdown("Paste your plain-English ETL mapping below. This tool converts it into easy-to-understand steps for functional or business users.")
 
+
+import re
+
+def generate_functional_pseudocode(text):
+    if not text or not isinstance(text, str):
+        return "⚠️ Invalid or empty mapping"
+
+    text = text.strip()
+    lines = text.splitlines()
+    output = []
+
+    # 1. Detect joins
+    join_lines = [line.strip() for line in lines if "join" in line.lower() or "=" in line.lower()]
+    join_conditions = [line for line in join_lines if re.search(r'=\s*', line)]
+
+    if join_conditions:
+        output.append("1. Join tables on:")
+        for jc in join_conditions:
+            output.append(f"   - {jc.strip()}")
+
+    # 2. Detect filter conditions
+    condition_lines = [line.strip() for line in lines if "when" in line.lower() or "and" in line.lower()]
+    condition_lines = [line for line in condition_lines if any(op in line for op in ["=", "in", "IN"])]
+
+    if condition_lines:
+        output.append("2. Apply filter conditions:")
+        for cond in condition_lines:
+            output.append(f"   - {cond.strip()}")
+
+    # 3. Detect target field to populate
+    populate_line = next((line for line in lines if "populate" in line.lower()), None)
+    target_field_line = next((line for line in lines if re.match(r"\w+\.\w+\.\w+", line.strip())), None)
+
+    if target_field_line:
+        output.append("3. Lookup and populate:")
+        output.append(f"   - Target field: {target_field_line.strip()}")
+
+    if not output:
+        return f"⚠️ Cannot parse this mapping: {text[:60]}..."
+
+    return "\n".join(output)
+
+
+
 def generate_functional_pseudocode(mapping_text: str) -> str:
     lines = []
 
