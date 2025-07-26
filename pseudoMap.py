@@ -10,6 +10,77 @@ st.markdown("Paste your plain-English ETL mapping below. This tool converts it i
 
 import re
 
+import re
+
+def generate_functional_pseudocode(text):
+    if not text or not isinstance(text, str):
+        return "⚠️ Invalid or empty mapping"
+
+    lines = [line.strip() for line in text.strip().splitlines() if line.strip()]
+    
+    joins = []
+    filters = []
+    target_field = None
+
+    in_join_block = False
+    in_filter_block = False
+
+    for line in lines:
+        l = line.lower()
+
+        # Detect section starts
+        if "by joining" in l:
+            in_join_block = True
+            in_filter_block = False
+            continue
+        elif any(kw in l for kw in ["when", "where", "based on the conditions", "if"]):
+            in_filter_block = True
+            in_join_block = False
+            continue
+        elif "populate" in l:
+            in_filter_block = False
+            in_join_block = False
+            continue
+
+        # Default detection when no headers are found
+        if "=" in line or " in " in l or " like " in l or " is null" in l:
+            # Heuristic: if line contains multiple table aliases → treat as join
+            if bool(re.search(r"\w+\.\w+\s*=\s*\w+\.\w+", line)):
+                if in_join_block or not in_filter_block:
+                    joins.append(line)
+                else:
+                    filters.append(line)
+            else:
+                filters.append(line)
+        # Capture target field (e.g., Db1.Tbl1.Field)
+        elif not target_field and re.match(r"^\w+\.\w+\.\w+$", line):
+            target_field = line
+
+    # Generate pseudocode
+    output = []
+    step = 1
+
+    if joins:
+        output.append(f"{step}. Join tables on:")
+        for j in joins:
+            output.append(f"   - {j}")
+        step += 1
+
+    if filters:
+        output.append(f"{step}. Apply filter conditions:")
+        for f in filters:
+            output.append(f"   - {f}")
+        step += 1
+
+    if target_field:
+        output.append(f"{step}. Lookup and populate:")
+        output.append(f"   - Target field: {target_field}")
+    else:
+        output.append(f"{step}. Target field: ❓ Not found")
+
+    return "\n".join(output)
+    
+
 def generate_functional_pseudocode(text):
     if not text or not isinstance(text, str):
         return "⚠️ Invalid or empty mapping"
