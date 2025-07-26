@@ -14,6 +14,76 @@ def generate_functional_pseudocode(text):
     if not text or not isinstance(text, str):
         return "⚠️ Invalid or empty mapping"
 
+    lines = [line.strip() for line in text.strip().splitlines() if line.strip()]
+    
+    joins = []
+    filters = []
+    target_field = None
+
+    # Flags to track current parsing section
+    in_join_block = False
+    in_filter_block = False
+
+    for line in lines:
+        l = line.lower()
+
+        # Detect start of JOIN or FILTER sections
+        if "by joining" in l:
+            in_join_block = True
+            in_filter_block = False
+            continue
+        elif "when" in l or "based on the conditions" in l:
+            in_filter_block = True
+            in_join_block = False
+            continue
+        elif "populate" in l and not target_field:
+            in_filter_block = False
+            in_join_block = False
+            continue  # Let the field line be picked below
+
+        # Extract join conditions
+        if in_join_block and "=" in line:
+            joins.append(line)
+
+        # Extract filter conditions
+        elif in_filter_block and any(op in line.lower() for op in ["=", " in(", " in (", "like", "<", ">", "between"]):
+            filters.append(line)
+
+        # Pick target field
+        elif not target_field and re.match(r"^\w+\.\w+\.\w+$", line):
+            target_field = line
+
+    # Build output
+    output = []
+    step = 1
+
+    if joins:
+        output.append(f"{step}. Join tables on:")
+        for j in joins:
+            output.append(f"   - {j}")
+        step += 1
+
+    if filters:
+        output.append(f"{step}. Apply filter conditions:")
+        for f in filters:
+            output.append(f"   - {f}")
+        step += 1
+
+    if target_field:
+        output.append(f"{step}. Lookup and populate:")
+        output.append(f"   - Target field: {target_field}")
+    else:
+        output.append(f"{step}. Target field: ❓ Not found")
+
+    return "\n".join(output)
+
+
+import re
+
+def generate_functional_pseudocode(text):
+    if not text or not isinstance(text, str):
+        return "⚠️ Invalid or empty mapping"
+
     text = text.strip()
     lines = text.splitlines()
     output = []
