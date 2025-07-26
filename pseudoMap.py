@@ -14,6 +14,78 @@ import re
 
 import re
 
+def generate_professional_pseudocode(text):
+    from textwrap import indent
+    text = normalize_text(text)
+    lines = [line.strip() for line in text.strip().splitlines() if line.strip()]
+
+    joins = []
+    filters = []
+    target_field = None
+
+    in_join_block = False
+    in_filter_block = False
+
+    for line in lines:
+        l = line.lower()
+
+        if "by joining" in l:
+            in_join_block = True
+            in_filter_block = False
+            continue
+        elif any(kw in l for kw in ["when", "where", "based on the conditions", "if"]):
+            in_filter_block = True
+            in_join_block = False
+            if any(op in line.lower() for op in ["=", " in ", " like ", " is null", ">", "<"]):
+                filters.append(line)
+            continue
+        elif "populate" in l:
+            in_filter_block = False
+            in_join_block = False
+            continue
+
+        if "=" in line or " in " in l or " like " in l or " is null" in l:
+            if bool(re.search(r"\w+\.\w+\s*=\s*\w+\.\w+", line)):
+                if in_join_block or not in_filter_block:
+                    joins.append(line)
+                else:
+                    filters.append(line)
+            else:
+                filters.append(line)
+        elif not target_field and re.match(r"^\w+\.\w+\.\w+$", line):
+            target_field = line
+
+    # Build output
+    output = []
+
+    output.append("📘 Functional Transformation Logic\n")
+
+    if target_field:
+        output.append(f"**Target Field**:\n→ `{target_field}`\n")
+    else:
+        output.append("**Target Field**:\n→ ❓ Not found\n")
+
+    if joins:
+        output.append("**1. Join Conditions**\n")
+        output.append("Join the following tables using these keys:\n")
+        for j in joins:
+            output.append(f"- `{j}`")
+        output.append("")
+
+    if filters:
+        output.append("**2. Filter Criteria**\n")
+        output.append("Apply the following filters:\n")
+        for f in filters:
+            output.append(f"- `{f}`")
+        output.append("")
+
+    output.append("**3. Transformation Rule**\n")
+    output.append(f"Lookup and populate the field `{target_field}` after applying the join and filter logic.\n")
+
+    return "\n".join(output)
+
+
+
 def normalize_text(text):
     # Replace curly quotes with straight quotes
     replacements = {
