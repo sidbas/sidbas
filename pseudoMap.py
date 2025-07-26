@@ -1,3 +1,116 @@
+# etl_mapper_app.py
+
+import streamlit as st
+import re
+
+st.set_page_config(page_title="ETL Mapping to Pseudocode", layout="wide")
+st.title("🛠️ ETL Mapping to Functional Pseudocode")
+st.markdown("Paste your plain-English ETL mapping below. This tool converts it into easy-to-understand steps for functional or business users.")
+
+def generate_functional_pseudocode(mapping_text: str) -> str:
+    lines = []
+
+    # --- Join ---
+    join_match = re.search(
+        r"Populate\s+(\S+)\s+as\s+(\S+)\s+using\s+(\S+)\s+by\s+Joining\s+(.+)",
+        mapping_text, re.IGNORECASE)
+    if join_match:
+        src_col, tgt_name, src_table, join_cond = join_match.groups()
+        left, right = map(str.strip, join_cond.split("="))
+        right_table = right.split(".")[0]
+        lines.append(f"1. Start with data from `{src_table}`.")
+        lines.append(f"2. Join `{src_table}` with `{right_table}`")
+        lines.append(f"   - Match where `{left}` = `{right}`.")
+        lines.append(f"3. Take `{src_col}` and rename it as `{tgt_name}`.")
+        return "\n".join(lines)
+
+    # --- Lookup ---
+    lookup_match = re.search(
+        r"Lookup\s+(\S+)\s+from\s+(\S+)\s+using\s+(\S+)(?:,\s*default\s+to\s+(.+))?",
+        mapping_text, re.IGNORECASE)
+    if lookup_match:
+        src_col, ref_table, ref_key, default = lookup_match.groups()
+        lines.append(f"1. Lookup value from `{ref_table}` using `{ref_key}` to match `{src_col}`.")
+        if default:
+            lines.append(f"2. If no match is found, use default value `{default.strip()}`.")
+        return "\n".join(lines)
+
+    # --- Type Conversion ---
+    convert_match = re.search(r"Convert\s+(\S+)\s+to\s+(Decimal|Date|Integer|String)(.*)?", mapping_text, re.IGNORECASE)
+    if convert_match:
+        col, target_type, detail = convert_match.groups()
+        lines.append(f"1. Convert `{col}` to `{target_type.upper()}{detail or ''}`.")
+        return "\n".join(lines)
+
+    # --- Conditional Logic ---
+    if_match = re.search(r"If\s+(.+?),\s*set\s+(\S+)\s+to\s+(\S+),\s*else\s+(\S+)", mapping_text, re.IGNORECASE)
+    if if_match:
+        condition, tgt_col, val_true, val_false = if_match.groups()
+        lines.append(f"1. If `{condition}`, set `{tgt_col}` to `{val_true}`.")
+        lines.append(f"2. Otherwise, set `{tgt_col}` to `{val_false}`.")
+        return "\n".join(lines)
+
+    # --- Rename ---
+    rename_match = re.search(r"Populate\s+(\S+)\s+as\s+(\S+)", mapping_text, re.IGNORECASE)
+    if rename_match:
+        src_col, tgt_name = rename_match.groups()
+        lines.append(f"1. Take value from `{src_col}` and rename it to `{tgt_name}`.")
+        return "\n".join(lines)
+
+    # --- Filter ---
+    filter_match = re.search(r"Include only records where (.+)", mapping_text, re.IGNORECASE)
+    if filter_match:
+        condition = filter_match.group(1)
+        lines.append(f"1. Keep only records where `{condition}`.")
+        return "\n".join(lines)
+
+    # --- Math Calculation ---
+    calc_match = re.search(r"Set\s+(\S+)\s*=\s*(\S+)\s*([\+\-\*/])\s*(\S+)", mapping_text, re.IGNORECASE)
+    if calc_match:
+        tgt_col, left, op, right = calc_match.groups()
+        ops = {'+': 'plus', '-': 'minus', '*': 'times', '/': 'divided by'}
+        lines.append(f"1. Calculate `{left}` {ops[op]} `{right}`.")
+        lines.append(f"2. Store result in `{tgt_col}`.")
+        return "\n".join(lines)
+
+    # --- Aggregation ---
+    agg_match = re.search(r"Group by\s+(\S+)\s+and\s+(sum|avg|count|min|max)\s+(\S+)", mapping_text, re.IGNORECASE)
+    if agg_match:
+        group_col, agg_fn, target_col = agg_match.groups()
+        lines.append(f"1. Group records by `{group_col}`.")
+        lines.append(f"2. For each group, compute `{agg_fn.upper()}` of `{target_col}`.")
+        return "\n".join(lines)
+
+    # --- Date Difference ---
+    datediff_match = re.search(r"Calculate days between (\S+) and (\S+)", mapping_text, re.IGNORECASE)
+    if datediff_match:
+        start, end = datediff_match.groups()
+        lines.append(f"1. Calculate the number of days between `{start}` and `{end}`.")
+        return "\n".join(lines)
+
+    return "⚠️ Could not parse this mapping. Try rephrasing or use a supported pattern."
+
+# ---- Streamlit UI ---- #
+sample = """Populate Source_Table.Column_1 as Acct_Id using Source_Table by Joining Source_Table.Column_Id = Reference_Table.Column_Id
+Lookup Customer_Id from dim_customer using customer_key, default to -1
+Convert Order_Date to Date
+If Status = 'Active', set Flag to 1, else 0
+Set Discount = Price * 0.1
+Group by Customer_ID and sum Total_Sales
+Calculate days between Start_Date and End_Date
+Include only records where Country = 'US'
+"""
+
+input_text = st.text_area("✏️ Mapping Instructions:", sample, height=250)
+
+if st.button("Generate Pseudocode"):
+    st.subheader("🧾 Functional Pseudocode")
+    for i, line in enumerate(input_text.strip().splitlines(), 1):
+        if line.strip():
+            st.markdown(f"**Mapping {i}:**")
+            st.code(generate_functional_pseudocode(line), language="text")
+
+
 import oracledb  # or cx_Oracle
 import pandas as pd
 
