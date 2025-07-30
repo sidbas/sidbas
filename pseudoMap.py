@@ -1,3 +1,12 @@
+import spacy
+
+try:
+    nlp = spacy.load("en_core_web_sm")
+    print("✅ spaCy model loaded successfully.")
+except OSError:
+    print("❌ spaCy model 'en_core_web_sm' is not installed.")
+
+
 # parser.py (OpenAI removed)
 
 import spacy
