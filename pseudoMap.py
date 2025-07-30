@@ -1,3 +1,97 @@
+# parser.py (OpenAI removed)
+
+import spacy
+import re
+
+nlp = spacy.load("en_core_web_sm")
+
+def normalize_quotes(text):
+    return text.replace("‘", "'").replace("’", "'").replace("“", '"').replace("”", '"')
+
+def extract_mapping_components(text):
+    text = normalize_quotes(text)
+    doc = nlp(text)
+
+    target_field = None
+    joins, filters = [], []
+    default_value, straight_move_source = None, None
+
+    join_pattern = re.compile(r"\w+\.\w+\s*=\s*\w+\.\w+")
+    filter_pattern = re.compile(r"(=|in\s*\(|like|is\s+null|>|<)", re.IGNORECASE)
+    field_pattern = re.compile(r"\w+\.\w+\.\w+")
+
+    for sent in doc.sents:
+        s = sent.text.strip()
+        lower = s.lower()
+
+        if "default" in lower or "with value" in lower:
+            consts = re.findall(r"['\"]([^'\"]+)['\"]", s)
+            if consts:
+                default_value = consts[0]
+
+        elif "from" in lower and "populate" in lower:
+            parts = re.findall(field_pattern, s)
+            if len(parts) >= 2:
+                target_field = parts[0]
+                straight_move_source = parts[1]
+
+        elif "populate" in lower and field_pattern.search(s):
+            match = field_pattern.search(s)
+            if match:
+                target_field = match.group()
+
+        elif join_pattern.search(s):
+            joins.append(s)
+
+        elif filter_pattern.search(s):
+            filters.append(s)
+
+        elif field_pattern.fullmatch(s.strip()):
+            target_field = s.strip()
+
+    return {
+        "target_field": target_field,
+        "joins": joins,
+        "filters": filters,
+        "default_value": default_value,
+        "straight_move_source": straight_move_source
+    }
+
+def parse_with_fallback(text):
+    return extract_mapping_components(text)
+
+def format_pseudocode(mapping):
+    output = ["📘 Functional Transformation Logic\n"]
+    tf = mapping.get("target_field", "❓ Not found")
+    output.append(f"**Target Field**:\n→ `{tf}`\n")
+
+    if mapping.get("default_value"):
+        output.append("**1. Default Assignment**")
+        output.append(f"Populate `{tf}` with default value: `{mapping['default_value']}`\n")
+
+    elif mapping.get("straight_move_source"):
+        output.append("**1. Straight Move**")
+        output.append(f"Move value from `{mapping['straight_move_source']}` to `{tf}` with no transformation.\n")
+
+    else:
+        if mapping.get("joins"):
+            output.append("**1. Join Conditions**")
+            for j in mapping["joins"]:
+                output.append(f"- `{j}`")
+
+        if mapping.get("filters"):
+            output.append("\n**2. Filter Criteria**")
+            for f in mapping["filters"]:
+                output.append(f"- `{f}`")
+
+        output.append("\n**3. Transformation Rule**")
+        output.append(f"Lookup and populate `{tf}` after applying join and filter logic.")
+
+    return "\n".join(output)
+
+
+
+
 # etl_mapper_app.py
 
 import streamlit as st
