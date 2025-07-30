@@ -1,5 +1,12 @@
 import spacy
 
+# Temporary fallback without full model
+nlp = spacy.blank("en")  # Limited NLP (no POS tagging, no sentence parsing)
+
+
+
+import spacy
+
 try:
     nlp = spacy.load("en_core_web_sm")
     print("✅ spaCy model loaded successfully.")
