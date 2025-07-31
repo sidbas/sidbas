@@ -1,3 +1,9 @@
+elif re.search(r"\bif\b.*\bthen\b", lower):
+    conditions.append(line)
+
+elif re.search(r"\b(uppercase|trim|cast|convert|format)\b", lower):
+    post_processing_steps.append(line)
+
 Populate Db1.Tbl1.Status_Flag
 If Db1.Tbl1.Status = 'C' then set 'Closed'
 Else if Db1.Tbl1.Status = 'O' then set 'Open'
