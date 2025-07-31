@@ -1,3 +1,30 @@
+1. In extract_mapping_components()
+elif re.search(r"\bwhen\b.*\bthen\b", lower):
+    conditions.append(line)
+
+elif "by joining" in lower:
+    join_tables = re.findall(r"\b\w+\.\w+\b", line)
+    for jt in join_tables:
+        joins.append(jt)
+
+elif "based on the join conditions" in lower:
+    continue  # just a heading, skip it
+
+elif "=" in line and "." in line:  # likely a join condition
+    joins.append(line)
+
+2. In format_pseudocode():
+if mapping.get("join_tables"):
+    output.append("\n🔸 **Join Tables**")
+    for jt in mapping["join_tables"]:
+        output.append(f"- {jt}")
+
+if mapping.get("join_conditions"):
+    output.append("\n🔸 **Join Conditions**")
+    for jc in mapping["join_conditions"]:
+        output.append(f"- {jc}")
+
+
 import streamlit as st
 from parser import extract_mapping_components, format_pseudocode  # your functions
 
