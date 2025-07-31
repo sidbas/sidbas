@@ -38,6 +38,10 @@ if mapping.get("condition_fields"):
         output.append(f"- `{cf}`")
 
 
+if mapping.get("source_fields"):
+    output.append(f"🔷 **Source Fields Involved:**")
+    for sf in mapping["source_fields"]:
+        output.append(f"- `{sf}`")
 
 #Updated Code Block for Table Collection:
 elif "by joining" in lower:
