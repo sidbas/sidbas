@@ -1,3 +1,48 @@
+# ✅ Case 1: when and then on the same line
+if "when" in lower and "then" in lower:
+    when_then_match = re.match(r"(.*?\bwhen\b.+?\bthen\b)\s+(.+)", line, re.IGNORECASE)
+    if when_then_match:
+        full = line.replace("‘", "'").replace("’", "'")
+        when_part = re.search(r"\bwhen\b\s+(.+?)\s+\bthen\b", full, re.IGNORECASE)
+        then_part = re.search(r"\bthen\b\s+(.+)", full, re.IGNORECASE)
+
+        if when_part and then_part:
+            condition_text = f"When {when_part.group(1).strip()} → then {then_part.group(1).strip()}"
+            mapping["conditions"].append(condition_text)
+
+            # Source field from then
+            mapping["source_fields"].append(then_part.group(1).strip())
+
+            # Fields used in condition
+            fields = re.findall(r"\b\w+\.\w+(?:\.\w+)?\b", when_part.group(1))
+            for f in fields:
+                if f not in mapping["condition_fields"]:
+                    mapping["condition_fields"].append(f)
+
+            i += 1
+            continue
+
+# ✅ Case 2: when and then on separate lines
+elif "when" in lower and i + 1 < len(lines) and "then" in lines[i + 1].lower():
+    when_clause = line.replace("‘", "'").replace("’", "'")
+    then_clause = lines[i + 1].replace("‘", "'").replace("’", "'")
+    condition_combined = f"{when_clause} → {then_clause}"
+    mapping["conditions"].append(condition_combined)
+
+    # Extract source field from THEN clause
+    then_match = re.search(r"\bthen\b\s+([\w\.\[\]]+)", then_clause, re.IGNORECASE)
+    if then_match:
+        mapping["source_fields"].append(then_match.group(1).strip())
+
+    # Extract condition fields from when_clause
+    fields = re.findall(r"\b\w+\.\w+(?:\.\w+)?\b", when_clause)
+    for f in fields:
+        if f not in mapping["condition_fields"]:
+            mapping["condition_fields"].append(f)
+
+    i += 2
+    continue
+
 
 if "when" in lower and i + 1 < len(lines) and "then" in lines[i + 1].lower():
     when_clause = line.replace("‘", "'").replace("’", "'")
