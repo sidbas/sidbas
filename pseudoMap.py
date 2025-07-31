@@ -1,3 +1,93 @@
+#Updated extract_mapping_components() for Multi-Condition Mappings
+import re
+
+def extract_mapping_components(text: str) -> dict:
+    mapping = {
+        "target_field": "",  # Optional: leave blank if multiple
+        "conditions": [],
+        "join_tables": [],
+        "join_conditions": [],
+        "post_processing": []
+    }
+
+    lines = [line.strip() for line in text.splitlines() if line.strip()]
+    collecting_joins = False
+    i = 0
+
+    while i < len(lines):
+        line = lines[i].strip()
+        lower = line.lower()
+
+        # Check for "when...then..." split across 2 lines
+        if "when" in lower and i + 1 < len(lines) and "then" in lines[i + 1].lower():
+            when_clause = line
+            then_clause = lines[i + 1]
+            condition_combined = f"{when_clause} → {then_clause}"
+            mapping["conditions"].append(condition_combined)
+
+            # Optional: set target_field from 'then' if only one found
+            if not mapping["target_field"]:
+                then_match = re.search(r"\bthen\b\s+([\w\.\[\]]+)", then_clause, re.IGNORECASE)
+                if then_match:
+                    mapping["target_field"] = then_match.group(1).strip()
+
+            i += 2
+            continue
+
+        # Join tables
+        elif "by joining" in lower:
+            tables = re.findall(r"\b\w+\.\w+\b", line)
+            mapping["join_tables"].extend(tables)
+            collecting_joins = True
+
+        # Start of join conditions
+        elif "based on the join conditions" in lower:
+            collecting_joins = True
+            i += 1
+            continue
+
+        # Join condition lines
+        elif collecting_joins and "=" in line and "." in line:
+            mapping["join_conditions"].append(line)
+
+        # Post-processing step
+        elif re.search(r"\b(trim|format|cast|clean|convert|uppercase)\b", lower):
+            mapping["post_processing"].append(line)
+
+        i += 1
+
+    return mapping
+
+#Update format_pseudocode() to Display Multiple Conditions
+def format_pseudocode(mapping: dict) -> str:
+    output = []
+
+    if mapping.get("target_field"):
+        output.append(f"🔷 **Sample Target Field:** `{mapping['target_field']}`\n")
+
+    if mapping.get("conditions"):
+        output.append("\n🔸 **Conditional Logic**")
+        for cond in mapping["conditions"]:
+            output.append(f"- {cond}")
+
+    if mapping.get("join_tables"):
+        output.append("\n🔸 **Join Tables**")
+        for table in mapping["join_tables"]:
+            output.append(f"- {table}")
+
+    if mapping.get("join_conditions"):
+        output.append("\n🔸 **Join Conditions**")
+        for cond in mapping["join_conditions"]:
+            output.append(f"- {cond}")
+
+    if mapping.get("post_processing"):
+        output.append("\n🔸 **Post-Processing Steps**")
+        for step in mapping["post_processing"]:
+            output.append(f"- {step}")
+
+    return "\n".join(output)
+
+
 import re
 
 def extract_mapping_components(text: str) -> dict:
