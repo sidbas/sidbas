@@ -1,3 +1,7 @@
+elif re.search(r"\b(if\b.*\bthen\b)|\belse\b", lower):
+    conditions.append(line)
+
+
 elif re.search(r"\bif\b.*\bthen\b", lower):
     conditions.append(line)
 
