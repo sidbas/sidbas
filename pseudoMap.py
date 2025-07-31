@@ -17,9 +17,9 @@ mapping = {
     "post_processing_steps": [],
 }
 
-if mapping["target_fields"]:
-    output += "🔷 Target Fields:\n"
-    for f in mapping["target_fields"]:
+if mapping["source_fields"]:
+    output += "🔷 Source Fields:\n"
+    for f in mapping["source_fields"]:
         output += f"- {f}\n"
     output += "\n"
 
