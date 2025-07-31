@@ -1,3 +1,25 @@
+
+if "when" in lower and i + 1 < len(lines) and "then" in lines[i + 1].lower():
+    when_clause = line.replace("‘", "'").replace("’", "'")
+    then_clause = lines[i + 1].replace("‘", "'").replace("’", "'")
+    condition_combined = f"{when_clause} → {then_clause}"
+    mapping["conditions"].append(condition_combined)
+
+    # Extract source field from THEN clause
+    then_match = re.search(r"\bthen\b\s+([\w\.\[\]]+)", then_clause, re.IGNORECASE)
+    if then_match:
+        field = then_match.group(1).strip()
+        mapping["source_fields"].append(field)
+
+    # Better regex: extract condition fields like Db1.Tbl1.ServiceId
+    fields = re.findall(r"\b\w+\.\w+(?:\.\w+)?\b", when_clause)
+    for f in fields:
+        if f not in mapping["condition_fields"]:
+            mapping["condition_fields"].append(f)
+
+    i += 2
+    continue
+
 #Add a condition_fields list in extract_mapping_components()
 mapping = {
     "source_fields": [],
