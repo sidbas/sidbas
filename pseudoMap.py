@@ -3,6 +3,50 @@ def format_pseudocode(mapping):
     output = [f"🔷 **Target Field:** `{tf}`\n"]
 
     if mapping.get("default_value"):
+        output.append("\n🔸 **Default Assignment**")
+        output.append(f"- Set `{tf}` to default value: `{mapping['default_value']}`")
+
+    elif mapping.get("straight_move_source"):
+        output.append("\n🔸 **Direct Assignment**")
+        output.append(f"- Assign `{tf}` = `{mapping['straight_move_source']}`")
+
+    if mapping.get("lookup_field"):
+        output.append("\n🔸 **Lookup Logic**")
+        output.append(f"- Lookup `{mapping['lookup_field']}` and assign to `{tf}`")
+
+    if mapping.get("transformation"):
+        output.append("\n🔸 **Transformation Logic**")
+        output.append(f"- {mapping['transformation']}")
+
+    if mapping.get("conditions"):
+        output.append("\n🔸 **Conditional Logic**")
+        for cond in mapping["conditions"]:
+            output.append(f"- {cond}")
+
+    if mapping.get("post_processing"):
+        output.append("\n🔸 **Post-Processing Steps**")
+        for step in mapping["post_processing"]:
+            output.append(f"- {step}")
+
+    if mapping.get("joins"):
+        output.append("\n🔸 **Join Conditions**")
+        for j in mapping["joins"]:
+            output.append(f"- {j}")
+
+    if mapping.get("filters"):
+        output.append("\n🔸 **Filter Criteria**")
+        for f in mapping["filters"]:
+            output.append(f"- {f}")
+
+    return "\n".join(output)
+
+
+
+def format_pseudocode(mapping):
+    tf = mapping.get("target_field", "❓ Not found")
+    output = [f"🔷 **Target Field:** `{tf}`\n"]
+
+    if mapping.get("default_value"):
         output.append("🔸 **Default Assignment**")
         output.append(f"Set `{tf}` to default value: `{mapping['default_value']}`")
 
