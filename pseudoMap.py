@@ -1,3 +1,52 @@
+import re
+
+def extract_mapping_components(text: str) -> dict:
+    mapping = {
+        "target_field": "",
+        "conditions": [],
+        "join_tables": [],
+        "join_conditions": [],
+        "post_processing": []
+    }
+
+    lines = [line.strip() for line in text.splitlines() if line.strip()]
+    collecting_joins = False
+
+    for line in lines:
+        lower = line.lower()
+
+        # Extract Target Field (after 'then' clause)
+        if re.search(r"\bthen\b\s+\w+", lower):
+            match = re.search(r"\bthen\b\s+([\w\.\[\]]+)", line, re.IGNORECASE)
+            if match:
+                mapping["target_field"] = match.group(1).strip()
+
+        # Conditional logic like: when X then Y
+        if re.search(r"\bwhen\b", lower):
+            mapping["conditions"].append(line)
+
+        # Join table list: "By joining: Db1.Tbl1, Db1.Tbl2"
+        elif "by joining" in lower:
+            tables = re.findall(r"\b\w+\.\w+\b", line)
+            mapping["join_tables"].extend(tables)
+            collecting_joins = True  # flag to start collecting join conditions
+
+        # Join condition heading
+        elif "based on the join conditions" in lower:
+            collecting_joins = True
+            continue
+
+        # Join conditions: A.col = B.col
+        elif collecting_joins and "=" in line and "." in line:
+            mapping["join_conditions"].append(line)
+
+        # Post-processing logic
+        elif re.search(r"\b(format|uppercase|trim|cast|convert|clean)\b", lower):
+            mapping["post_processing"].append(line)
+
+    return mapping
+
+
 1. In extract_mapping_components()
 elif re.search(r"\bwhen\b.*\bthen\b", lower):
     conditions.append(line)
