@@ -47,3 +47,20 @@ Based on the join conditions:
 
 Db1.Tbl1.SNo = Db1.Tbl2.SNo
 And Db1.Tbl1.BId = Db1.Tbl2.BId
+
+Transformation Logic:
+
+When Db1.Tbl1.ServiceId IN (‘I’) then Db1.Tbl1.ExecDate
+
+By joining:
+Db1.Tbl1,
+Db1.Tbl2
+
+Based on the join conditions:
+Db1.Tbl1.SNo = Db1.Tbl2.SNo
+And Db1.Tbl1.BId = Db1.Tbl2.BId
+
+Note: Ensure ServiceId is always valid before running the transformation.
+
+
+
