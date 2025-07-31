@@ -1,3 +1,30 @@
+# Handle "Lookup and populate" or "Populate" lines
+if lower.startswith("lookup and populate") or lower.startswith("populate"):
+    if i + 1 < len(lines):
+        field_line = lines[i + 1].strip()
+        mapping["target_fields"].append(field_line)
+        i += 2
+        continue
+        
+mapping = {
+    "conditions": [],
+    "source_fields": [],
+    "target_fields": [],
+    "condition_fields": [],
+    "join_tables": [],
+    "join_conditions": [],
+    "default_logic": [],
+    "post_processing_steps": [],
+}
+
+if mapping["target_fields"]:
+    output += "🔷 Target Fields:\n"
+    for f in mapping["target_fields"]:
+        output += f"- {f}\n"
+    output += "\n"
+
+
+
 # ✅ Case 1: when and then on the same line
 if "when" in lower and "then" in lower:
     when_then_match = re.match(r"(.*?\bwhen\b.+?\bthen\b)\s+(.+)", line, re.IGNORECASE)
