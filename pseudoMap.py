@@ -1,3 +1,14 @@
+if lower.startswith("by joining") or lower.startswith("from") or lower.startswith("joining") or lower.startswith("join:"):
+    # Extract table names from the next line(s)
+    table_line = lines[i + 1].strip()
+    tables = [t.strip().rstrip(',') for t in table_line.split(",") if t.strip()]
+    for t in tables:
+        if t not in mapping["join_tables"]:
+            mapping["join_tables"].append(t)
+    i += 2
+    continue
+
+
 # Handle "Lookup and populate" or "Populate" lines
 if lower.startswith("lookup and populate") or lower.startswith("populate"):
     if i + 1 < len(lines):
