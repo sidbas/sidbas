@@ -1,3 +1,115 @@
+# parser.py
+
+import spacy
+import re
+
+# Use lightweight spaCy model and add sentence detection
+nlp = spacy.blank("en")
+nlp.add_pipe("sentencizer")
+
+def normalize_quotes(text):
+    return text.replace("‘", "'").replace("’", "'").replace("“", '"').replace("”", '"')
+
+def extract_mapping_components(text):
+    text = normalize_quotes(text)
+    doc = nlp(text)
+
+    target_field = None
+    joins = []
+    filters = []
+    default_value = None
+    straight_move_source = None
+    lookup_field = None
+    transformation = None
+
+    field_pattern = re.compile(r"\b\w+\.\w+\.\w+\b")
+    condition_pattern = re.compile(r"\b(=|in\s*\(|like|is\s+null|>|<)\b", re.IGNORECASE)
+    join_pattern = re.compile(r"\b\w+\.\w+\s*=\s*\w+\.\w+\b", re.IGNORECASE)
+    default_pattern = re.compile(r"default|with value", re.IGNORECASE)
+
+    lines = [sent.text.strip() for sent in doc.sents if sent.text.strip()]
+
+    for line in lines:
+        lower = line.lower()
+
+        if "populate" in lower and field_pattern.search(line):
+            target_field = field_pattern.search(line).group()
+
+        elif default_pattern.search(lower):
+            value_match = re.findall(r"['\"](.*?)['\"]", line)
+            if value_match:
+                default_value = value_match[0]
+
+        elif "from" in lower and "to" in lower:
+            matches = field_pattern.findall(line)
+            if len(matches) >= 2:
+                straight_move_source = matches[0]
+                target_field = matches[1]
+
+        elif "lookup" in lower:
+            fields = field_pattern.findall(line)
+            if fields:
+                lookup_field = fields[-1]
+
+        elif join_pattern.search(line):
+            joins.append(line)
+
+        elif condition_pattern.search(line):
+            filters.append(line)
+
+        elif "transform" in lower or "logic" in lower:
+            transformation = line
+
+    return {
+        "target_field": target_field,
+        "joins": joins,
+        "filters": filters,
+        "default_value": default_value,
+        "straight_move_source": straight_move_source,
+        "lookup_field": lookup_field,
+        "transformation": transformation
+    }
+
+def format_pseudocode(mapping):
+    tf = mapping.get("target_field", "❓ Not found")
+    output = [f"🔷 **Target Field:** `{tf}`\n"]
+
+    # 1. Default
+    if mapping.get("default_value"):
+        output.append("🔸 **Default Assignment**")
+        output.append(f"Set `{tf}` to default value: `{mapping['default_value']}`")
+
+    # 2. Straight Move
+    elif mapping.get("straight_move_source"):
+        output.append("🔸 **Direct Assignment**")
+        output.append(f"Assign `{tf}` = `{mapping['straight_move_source']}`")
+
+    # 3. Lookup
+    elif mapping.get("lookup_field"):
+        output.append("🔸 **Lookup Logic**")
+        output.append(f"Lookup `{mapping['lookup_field']}` and assign to `{tf}`")
+
+    # 4. Transformation logic
+    if mapping.get("transformation"):
+        output.append("🔸 **Transformation Logic**")
+        output.append(mapping["transformation"])
+
+    # 5. Joins
+    if mapping.get("joins"):
+        output.append("🔸 **Join Conditions**")
+        for j in mapping["joins"]:
+            output.append(f"- {j}")
+
+    # 6. Filters
+    if mapping.get("filters"):
+        output.append("🔸 **Filter Criteria**")
+        for f in mapping["filters"]:
+            output.append(f"- {f}")
+
+    return "\n".join(output)
+
+
+
 import spacy
 
 # Temporary fallback without full model
