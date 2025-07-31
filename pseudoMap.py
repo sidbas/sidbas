@@ -1,3 +1,44 @@
+#Add a condition_fields list in extract_mapping_components()
+mapping = {
+    "source_fields": [],
+    "condition_fields": [],
+    "conditions": [],
+    "join_tables": [],
+    "join_conditions": [],
+    "post_processing": []
+}
+
+#Extract fields from when clauses
+#Update this logic inside the main loop:
+if "when" in lower and i + 1 < len(lines) and "then" in lines[i + 1].lower():
+    when_clause = line
+    then_clause = lines[i + 1]
+    condition_combined = f"{when_clause} → {then_clause}"
+    mapping["conditions"].append(condition_combined)
+
+    # 🔹 Extract source field from THEN clause
+    then_match = re.search(r"\bthen\b\s+([\w\.\[\]]+)", then_clause, re.IGNORECASE)
+    if then_match:
+        mapping["source_fields"].append(then_match.group(1).strip())
+
+    # 🔹 Extract all possible field references in the WHEN clause
+    fields = re.findall(r"\b\w+\.\w+\b", when_clause)
+    for f in fields:
+        if f not in mapping["condition_fields"]:
+            mapping["condition_fields"].append(f)
+
+    i += 2
+    continue
+
+#Update format_pseudocode() to include it
+#Add this block just after source fields:
+if mapping.get("condition_fields"):
+    output.append(f"\n🔹 **Condition Fields Used:**")
+    for cf in mapping["condition_fields"]:
+        output.append(f"- `{cf}`")
+
+
+
 #Updated Code Block for Table Collection:
 elif "by joining" in lower:
     collecting_joins = False
