@@ -1,3 +1,15 @@
+# Inside the extract_mapping_components() function:
+if lower.startswith("note") or lower.startswith("comment"):
+    note = line.strip()
+    mapping["notes"].append(note)
+    continue
+
+if mapping["notes"]:
+    output += "🔖 Notes:\n"
+    for note in mapping["notes"]:
+        output += f"- {note}\n"
+    output += "\n"
+
 if lower.startswith("by joining") or lower.startswith("from") or lower.startswith("joining") or lower.startswith("join:"):
     # Extract table names from the next line(s)
     table_line = lines[i + 1].strip()
