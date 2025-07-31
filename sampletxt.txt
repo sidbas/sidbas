@@ -1,0 +1,6 @@
+Populate Db1.Tbl1.Status_Flag
+If Db1.Tbl1.Status = 'C' then set 'Closed'
+Else if Db1.Tbl1.Status = 'O' then set 'Open'
+Else set 'Pending'
+Then format the value to uppercase
+Finally assign to Db1.Tbl1.Status_Flag
