@@ -1,3 +1,17 @@
+#Updated Code Block for Table Collection:
+elif "by joining" in lower:
+    collecting_joins = False
+    i += 1
+    # Collect table names from subsequent lines
+    while i < len(lines):
+        next_line = lines[i].strip()
+        if next_line.lower().startswith("based on the join conditions") or not next_line:
+            break
+        tables = re.findall(r"\b\w+\.\w+\b", next_line)
+        mapping["join_tables"].extend(tables)
+        i += 1
+    continue
+
 #Updated extract_mapping_components() for Multi-Condition Mappings
 import re
 
