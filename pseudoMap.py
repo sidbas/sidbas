@@ -1,3 +1,20 @@
+import streamlit as st
+from parser import extract_mapping_components, format_pseudocode  # your functions
+
+st.title("ETL Mapping to Pseudocode Generator")
+
+user_input = st.text_area("Paste your mapping description here:")
+
+if st.button("Generate Pseudocode"):
+    if user_input.strip():
+        mapping = extract_mapping_components(user_input)
+        pseudocode_output = format_pseudocode(mapping)
+
+        # ✅ Display with Markdown formatting
+        st.markdown(pseudocode_output)
+    else:
+        st.warning("Please enter mapping text.")
+
 def format_pseudocode(mapping):
     tf = mapping.get("target_field", "❓ Not found")
     output = [f"🔷 **Target Field:** `{tf}`\n"]
