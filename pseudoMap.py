@@ -1,3 +1,19 @@
+import streamlit as st
+from parser import extract_mapping_components, format_pseudocode
+
+st.title("ETL Mapping → Functional Pseudocode Generator")
+
+user_input = st.text_area("Paste your mapping description here:")
+
+if st.button("Generate Pseudocode"):
+    if user_input.strip():
+        mapping = extract_mapping_components(user_input)
+        pseudocode = format_pseudocode(mapping)
+        st.markdown(pseudocode)
+    else:
+        st.warning("Please enter a mapping description.")
+
+
 # parser.py
 
 import spacy
