@@ -130,7 +130,18 @@ def format_pseudocode(mapping: dict) -> str:
 
     return output
 
+Lookup and populate:
+Db1.Tbl1.ExecDate
 
+From:
+Db1.Tbl1
+Db1.Tbl2
+
+Based on the join conditions:
+Db1.Tbl1.SNo = Db1.Tbl2.SNo
+Db1.Tbl1.BId = Db1.Tbl2.BId
+
+Note: This logic assumes the latest execution date per ServiceId.
 
 
 # Inside the extract_mapping_components() function:
