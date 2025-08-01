@@ -1,3 +1,46 @@
+import cx_Oracle
+import pandas as pd
+
+def fetch_mappings_from_oracle():
+    # Replace with your actual values
+    dsn = cx_Oracle.makedsn("HOSTNAME", PORT, service_name="SERVICE")
+    conn = cx_Oracle.connect(user="USERNAME", password="PASSWORD", dsn=dsn)
+
+    query = "SELECT Map_Id, TO_LOB(Trans_Rule) AS Trans_Rule FROM YourMappingTable"
+    df = pd.read_sql(query, con=conn)
+
+    conn.close()
+    return df
+
+def transform_rules(df):
+    output = []
+    for _, row in df.iterrows():
+        map_id = row["MAP_ID"]
+        rule = row["TRANS_RULE"]
+        components = extract_mapping_components(rule)
+        pseudo = format_pseudocode(components)
+        output.append({
+            "Map_Id": map_id,
+            "Trans_Rule": rule,
+            "Pseudocode": pseudo
+        })
+    return pd.DataFrame(output)
+    
+import streamlit as st
+
+st.title("Oracle ETL Mapping Viewer")
+
+# Load from Oracle
+with st.spinner("Fetching data from Oracle..."):
+    df_raw = fetch_mappings_from_oracle()
+    df_result = transform_rules(df_raw)
+
+# Display in interactive grid
+st.dataframe(df_result, use_container_width=True)
+
+
+
+
 import re
 
 def extract_mapping_components(text: str) -> dict:
