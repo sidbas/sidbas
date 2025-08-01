@@ -1,3 +1,73 @@
+import streamlit as st
+import pandas as pd
+import oracledb
+from st_aggrid import AgGrid, GridOptionsBuilder
+
+# Replace with your actual parser functions
+from your_parser_module import extract_mapping_components, format_pseudocode
+
+# Initialize Oracle connection (Thin mode)
+def fetch_mappings_from_oracle():
+    try:
+        connection = oracledb.connect(
+            user="YOUR_USERNAME",
+            password="YOUR_PASSWORD",
+            dsn="YOUR_HOST:YOUR_PORT/YOUR_SERVICE"
+        )
+
+        query = """
+        SELECT Map_Id, TO_LOB(Trans_Rule) AS Trans_Rule
+        FROM YourMappingTable
+        """
+        df = pd.read_sql(query, con=connection)
+        connection.close()
+        return df
+    except Exception as e:
+        st.error(f"❌ Oracle connection failed: {e}")
+        return pd.DataFrame()
+
+# Transform the CLOB rule into functional pseudocode
+def transform_mappings(df):
+    output = []
+    for _, row in df.iterrows():
+        try:
+            components = extract_mapping_components(row["TRANS_RULE"])
+            pseudocode = format_pseudocode(components)
+        except Exception as ex:
+            pseudocode = f"⚠️ Failed to parse: {ex}"
+
+        output.append({
+            "Map_Id": row["MAP_ID"],
+            "Trans_Rule": row["TRANS_RULE"],
+            "Pseudocode": pseudocode
+        })
+    return pd.DataFrame(output)
+
+# Streamlit UI
+st.set_page_config(page_title="ETL Mapping Viewer", layout="wide")
+st.title("🧩 ETL Mapping Rules - Pseudocode Viewer")
+
+with st.spinner("🔄 Connecting to Oracle and loading mappings..."):
+    df_raw = fetch_mappings_from_oracle()
+
+if not df_raw.empty:
+    df_transformed = transform_mappings(df_raw)
+
+    st.success("✅ Mappings loaded and parsed!")
+
+    # Use AgGrid for flexible viewing
+    gb = GridOptionsBuilder.from_dataframe(df_transformed)
+    gb.configure_column("Trans_Rule", wrapText=True, autoHeight=True)
+    gb.configure_column("Pseudocode", wrapText=True, autoHeight=True)
+    grid_options = gb.build()
+
+    AgGrid(df_transformed, gridOptions=grid_options, fit_columns_on_grid_load=True)
+
+else:
+    st.warning("No mappings found or failed to connect.")
+
+
+
 import cx_Oracle
 import pandas as pd
 
