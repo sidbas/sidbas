@@ -1,3 +1,138 @@
+import re
+
+def extract_mapping_components(text: str) -> dict:
+    lines = text.strip().splitlines()
+    mapping = {
+        "conditions": [],
+        "source_fields": [],
+        "target_fields": [],
+        "condition_fields": [],
+        "join_tables": [],
+        "join_conditions": [],
+        "default_logic": [],
+        "post_processing_steps": [],
+        "notes": [],
+    }
+
+    i = 0
+    while i < len(lines):
+        line = lines[i].strip()
+        lower = line.lower()
+
+        # Handle notes or comments
+        if lower.startswith("note") or lower.startswith("comment"):
+            mapping["notes"].append(line)
+            i += 1
+            continue
+
+        # Handle lookup and populate or populate
+        if lower.startswith("lookup and populate") or lower.startswith("populate"):
+            if i + 1 < len(lines):
+                next_line = lines[i + 1].strip()
+                if next_line:
+                    mapping["source_fields"].append(next_line)
+                i += 2
+                continue
+
+        # Handle "when ... then ..." in same line
+        if re.match(r"when\s+.*\s+then\s+.*", lower):
+            mapping["conditions"].append(line)
+            # Try to extract the field used in the condition
+            field_matches = re.findall(r"(Db\d+\.\w+\.\w+)", line)
+            for field in field_matches:
+                if field not in mapping["condition_fields"]:
+                    mapping["condition_fields"].append(field)
+            # Also add the result field (e.g., from THEN clause)
+            then_match = re.search(r"then\s+(Db\d+\.\w+\.\w+)", lower, re.IGNORECASE)
+            if then_match:
+                result_field = then_match.group(1)
+                if result_field not in mapping["source_fields"]:
+                    mapping["source_fields"].append(result_field)
+            i += 1
+            continue
+
+        # Handle "By joining", "From", etc.
+        if lower.startswith("by joining") or lower.startswith("from") or lower.startswith("joining") or lower.startswith("join"):
+            i += 1
+            while i < len(lines):
+                join_line = lines[i].strip()
+                if not join_line or re.match(r"(based on|and\s)", join_line.lower()):
+                    break
+                if join_line not in mapping["join_tables"]:
+                    mapping["join_tables"].append(join_line)
+                i += 1
+            continue
+
+        # Handle join conditions
+        if lower.startswith("based on the join conditions") or lower.startswith("join conditions"):
+            i += 1
+            while i < len(lines):
+                join_cond = lines[i].strip()
+                if not join_cond:
+                    break
+                mapping["join_conditions"].append(join_cond)
+                i += 1
+            continue
+
+        # Handle fallback WHEN condition (in multiline)
+        if lower.startswith("when "):
+            condition = line
+            i += 1
+            while i < len(lines) and not lines[i].strip().lower().startswith("then"):
+                condition += " " + lines[i].strip()
+                i += 1
+            if i < len(lines) and lines[i].strip().lower().startswith("then"):
+                condition += " " + lines[i].strip()
+                i += 1
+            mapping["conditions"].append(condition)
+            field_matches = re.findall(r"(Db\d+\.\w+\.\w+)", condition)
+            for field in field_matches:
+                if field not in mapping["condition_fields"]:
+                    mapping["condition_fields"].append(field)
+            continue
+
+        i += 1
+
+    return mapping
+
+def format_pseudocode(mapping: dict) -> str:
+    output = ""
+
+    if mapping["source_fields"]:
+        output += "🔷 Source Fields:\n"
+        for f in mapping["source_fields"]:
+            output += f"- {f}\n"
+        output += "\n"
+
+    if mapping["join_tables"]:
+        output += "🔸 Join Tables:\n"
+        for t in mapping["join_tables"]:
+            output += f"- {t}\n"
+        output += "\n"
+
+    if mapping["join_conditions"]:
+        output += "🔸 Join Conditions:\n"
+        for jc in mapping["join_conditions"]:
+            output += f"- {jc}\n"
+        output += "\n"
+
+    if mapping["conditions"]:
+        output += "🧾 Conditional Logic:\n"
+        for cond in mapping["conditions"]:
+            output += f"- {cond}\n"
+        output += "\n"
+
+    if mapping["notes"]:
+        output += "🔖 Notes:\n"
+        for note in mapping["notes"]:
+            output += f"- {note}\n"
+        output += "\n"
+
+    return output
+
+
+
+
 # Inside the extract_mapping_components() function:
 if lower.startswith("note") or lower.startswith("comment"):
     note = line.strip()
