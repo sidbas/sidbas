@@ -38,7 +38,13 @@ with st.spinner("Fetching data from Oracle..."):
 # Display in interactive grid
 st.dataframe(df_result, use_container_width=True)
 
+from st_aggrid import AgGrid, GridOptionsBuilder
 
+gb = GridOptionsBuilder.from_dataframe(df_result)
+gb.configure_column("Pseudocode", wrapText=True, autoHeight=True)
+grid_options = gb.build()
+
+AgGrid(df_result, gridOptions=grid_options, fit_columns_on_grid_load=True)
 
 
 import re
