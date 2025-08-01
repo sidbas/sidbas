@@ -1,3 +1,41 @@
+from st_aggrid import AgGrid, GridOptionsBuilder
+
+# Assuming df_transformed has a "Pseudocode" column
+gb = GridOptionsBuilder.from_dataframe(df_transformed)
+
+# Allow text wrapping and auto height for the pseudocode column
+gb.configure_column(
+    "Pseudocode",
+    header_name="📝 Pseudocode",
+    wrapText=True,
+    autoHeight=True,
+    cellStyle={
+        "whiteSpace": "pre-line",  # preserves line breaks
+        "fontFamily": "monospace", # optional: use code-like font
+        "fontSize": "13px"
+    }
+)
+
+# Apply same for Trans_Rule if needed
+gb.configure_column(
+    "Trans_Rule",
+    wrapText=True,
+    autoHeight=True,
+    cellStyle={
+        "whiteSpace": "pre-line",
+        "fontSize": "12px"
+    }
+)
+
+# Optional: set other columns to auto-fit or fixed width
+gb.configure_default_column(wrapText=True, autoHeight=True)
+
+grid_options = gb.build()
+
+# Render in Streamlit
+AgGrid(df_transformed, gridOptions=grid_options, fit_columns_on_grid_load=True)
+
+
 import oracledb
 import pandas as pd
 
