@@ -1,3 +1,29 @@
+import oracledb
+import pandas as pd
+
+def fetch_mappings_from_oracle():
+    connection = oracledb.connect(
+        user="your_user",
+        password="your_password",
+        dsn="your_host:your_port/your_service"
+    )
+
+    cursor = connection.cursor()
+    cursor.execute("SELECT Map_Id, Trans_Rule FROM YourMappingTable")
+
+    # Extract rows and read the CLOBs properly
+    rows = []
+    for map_id, clob in cursor:
+        try:
+            rule_text = clob.read() if clob else ""
+        except Exception as e:
+            rule_text = f"[CLOB read error: {e}]"
+        rows.append({"Map_Id": map_id, "Trans_Rule": rule_text})
+
+    connection.close()
+    return pd.DataFrame(rows)
+
+
 import streamlit as st
 import pandas as pd
 import oracledb
