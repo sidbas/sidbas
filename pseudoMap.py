@@ -1,3 +1,36 @@
+if selected:
+    try:
+        # Access first row safely
+        row_dict = selected[0]
+
+        # Optional: show the selection to verify
+        st.write("✅ Selected Row Dict:", row_dict)
+
+        # Extract the Map_Id from the selected dict
+        selected_map_id = row_dict["Map_Id"]
+
+        # Match the row from full dataset
+        selected_row = df_raw[df_raw["Map_Id"] == selected_map_id]
+
+        if not selected_row.empty:
+            selected_row = selected_row.iloc[0]
+
+            # Display full pseudocode
+            st.markdown(f"### 🔍 Map ID: `{selected_map_id}`")
+            with st.expander("📄 Full Pseudocode", expanded=True):
+                st.markdown(f"```\n{selected_row['Pseudocode']}\n```")
+        else:
+            st.warning("Map ID not found in full dataset.")
+
+    except Exception as e:
+        st.error(f"⚠️ Error accessing selection: {e}")
+else:
+    st.info("Please select a row in the grid to view pseudocode.")
+    
+    
+    
+
+
 st.subheader("🔍 Grid Selection Debug")
 st.write("Full Selection:", selected)
 if selected:
