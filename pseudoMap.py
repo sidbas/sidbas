@@ -1,3 +1,26 @@
+import oracledb
+import pandas as pd
+
+def fetch_mappings_from_oracle():
+    connection = oracledb.connect(
+        user="your_user",
+        password="your_password",
+        dsn="your_host:your_port/your_service"
+    )
+
+    cursor = connection.cursor()
+    cursor.execute("SELECT Map_Id, Trans_Rule FROM YourMappingTable")
+
+    rows = []
+    for map_id, clob in cursor:
+        rule_text = clob.read() if clob else ""
+        rows.append({"Map_Id": map_id, "Trans_Rule": rule_text})
+
+    connection.close()
+    return pd.DataFrame(rows)
+
+
+
 def generate_pseudocode(transformation_text):
     # Placeholder — use your advanced parsing logic here
     if not transformation_text.strip():
@@ -13,6 +36,44 @@ df_raw = fetch_mappings_from_oracle()
 df_raw["Pseudocode"] = df_raw["Trans_Rule"].apply(generate_pseudocode)
 df_raw["Preview"] = df_raw["Pseudocode"].apply(lambda x: truncate_text(x, 100))
 
+
+import streamlit as st
+from st_aggrid import AgGrid, GridOptionsBuilder
+
+st.title("📘 Mapping Viewer with Pseudocode")
+
+gb = GridOptionsBuilder.from_dataframe(df_raw[["Map_Id", "Preview"]])
+gb.configure_column("Preview", wrapText=True, autoHeight=True)
+grid_options = gb.build()
+
+response = AgGrid(
+    df_raw[["Map_Id", "Preview"]],
+    gridOptions=grid_options,
+    fit_columns_on_grid_load=True,
+    update_mode='SELECTION_CHANGED',
+    height=400
+)
+
+selected = response["selected_rows"]
+
+def format_pseudocode(text):
+    # Optional color/emoji enhancement
+    text = text.replace("IF", "🟢 **IF**")
+    text = text.replace("THEN", "🔵 **THEN**")
+    text = text.replace("JOIN", "🟣 **JOIN**")
+    return text
+
+if selected:
+    selected_map_id = selected[0]["Map_Id"]
+    selected_row = df_raw[df_raw["Map_Id"] == selected_map_id].iloc[0]
+
+    st.markdown(f"### 🔍 Map ID: `{selected_map_id}`")
+
+    with st.expander("📄 Full Pseudocode", expanded=True):
+        st.markdown(format_pseudocode(selected_row["Pseudocode"]))
+        
+        
+        
 
 import streamlit as st
 from st_aggrid import AgGrid, GridOptionsBuilder
