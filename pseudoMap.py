@@ -1,3 +1,58 @@
+def generate_pseudocode(transformation_text):
+    # Placeholder — use your advanced parsing logic here
+    if not transformation_text.strip():
+        return "No transformation logic provided."
+    return transformation_text.strip()  # Replace with NLP logic
+    
+    
+    
+def truncate_text(text, limit=120):
+    return text[:limit] + "..." if len(text) > limit else text
+
+df_raw = fetch_mappings_from_oracle()
+df_raw["Pseudocode"] = df_raw["Trans_Rule"].apply(generate_pseudocode)
+df_raw["Preview"] = df_raw["Pseudocode"].apply(lambda x: truncate_text(x, 100))
+
+
+import streamlit as st
+from st_aggrid import AgGrid, GridOptionsBuilder
+
+st.title("📘 Mapping Viewer with Pseudocode")
+
+gb = GridOptionsBuilder.from_dataframe(df_raw[["Map_Id", "Preview"]])
+gb.configure_column("Preview", wrapText=True, autoHeight=True)
+grid_options = gb.build()
+
+response = AgGrid(
+    df_raw[["Map_Id", "Preview"]],
+    gridOptions=grid_options,
+    fit_columns_on_grid_load=True,
+    update_mode='SELECTION_CHANGED',
+    height=400
+)
+
+selected = response["selected_rows"]
+
+
+def format_pseudocode(text):
+    # Optional color/emoji enhancement
+    text = text.replace("IF", "🟢 **IF**")
+    text = text.replace("THEN", "🔵 **THEN**")
+    text = text.replace("JOIN", "🟣 **JOIN**")
+    return text
+
+if selected:
+    selected_map_id = selected[0]["Map_Id"]
+    selected_row = df_raw[df_raw["Map_Id"] == selected_map_id].iloc[0]
+
+    st.markdown(f"### 🔍 Map ID: `{selected_map_id}`")
+
+    with st.expander("📄 Full Pseudocode", expanded=True):
+        st.markdown(format_pseudocode(selected_row["Pseudocode"]))
+        
+        
+
+
 from st_aggrid import AgGrid, GridOptionsBuilder
 
 # Assuming df_transformed has a "Pseudocode" column
