@@ -1,3 +1,25 @@
+from st_aggrid import AgGrid, GridOptionsBuilder, GridUpdateMode
+
+# Build grid options
+gb = GridOptionsBuilder.from_dataframe(df_raw[["Map_Id", "Preview"]])
+gb.configure_column("Preview", wrapText=True, autoHeight=True)
+gb.configure_selection(selection_mode="single", use_checkbox=True)  # 🔥 This enables selection
+grid_options = gb.build()
+
+# Render grid
+response = AgGrid(
+    df_raw[["Map_Id", "Preview"]],
+    gridOptions=grid_options,
+    fit_columns_on_grid_load=True,
+    update_mode=GridUpdateMode.SELECTION_CHANGED,
+    height=400
+)
+
+selected = response["selected_rows"]
+
+
+
+
 if selected:
     # Safely extract selected map_id
     selected_map_id = selected[0].get("Map_Id")
