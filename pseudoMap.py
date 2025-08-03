@@ -1,3 +1,44 @@
+from st_aggrid import AgGrid, GridOptionsBuilder, GridUpdateMode
+
+df_raw["Map_Id"] = df_raw["Map_Id"].astype(str)  # ensure Map_Id is str
+
+gb = GridOptionsBuilder.from_dataframe(df_raw[["Map_Id", "Preview"]])
+gb.configure_column("Preview", wrapText=True, autoHeight=True)
+gb.configure_selection(selection_mode="single", use_checkbox=True)
+grid_options = gb.build()
+
+response = AgGrid(
+    df_raw[["Map_Id", "Preview"]],
+    gridOptions=grid_options,
+    update_mode=GridUpdateMode.SELECTION_CHANGED,
+    fit_columns_on_grid_load=True,
+    height=400
+)
+
+selected = response["selected_rows"]
+
+
+if selected:
+    st.write("Selected row:", selected[0])  # Confirm it’s a dict
+
+    try:
+        selected_map_id = selected[0]["Map_Id"]
+        selected_row = df_raw[df_raw["Map_Id"] == selected_map_id]
+
+        if not selected_row.empty:
+            selected_row = selected_row.iloc[0]
+            st.markdown(f"### 🔍 Map ID: `{selected_map_id}`")
+            with st.expander("📄 Full Pseudocode", expanded=True):
+                st.markdown(format_pseudocode(selected_row["Pseudocode"]))
+        else:
+            st.warning(f"Map ID {selected_map_id} not found.")
+    except Exception as e:
+        st.error(f"Error accessing selection: {e}")
+else:
+    st.info("Please select a row from the grid.")
+    
+
+
 if selected:
     first_row = selected[0]
     st.write("DEBUG - First Row Type:", type(first_row))  # Check if dict or str
