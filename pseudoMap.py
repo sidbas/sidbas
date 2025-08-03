@@ -1,3 +1,59 @@
+st.subheader("🔍 Grid Selection Debug")
+st.write("Full Selection:", selected)
+if selected:
+    st.write("Type of first row:", type(selected[0]))
+    
+    AgGrid(df_raw[["Map_Id", "Preview"]])  # ✅ GOOD — a real DataFrame
+    
+    from st_aggrid import AgGrid, GridOptionsBuilder, GridUpdateMode
+import streamlit as st
+import pandas as pd
+
+# Sample data
+df_raw = pd.DataFrame({
+    "Map_Id": ["00001", "00002", "00003"],
+    "Preview": ["IF condition 1", "IF condition 2", "IF condition 3"],
+    "Pseudocode": ["Full pseudocode 1", "Full pseudocode 2", "Full pseudocode 3"]
+})
+df_raw["Map_Id"] = df_raw["Map_Id"].astype(str)
+
+# Grid setup
+gb = GridOptionsBuilder.from_dataframe(df_raw[["Map_Id", "Preview"]])
+gb.configure_column("Preview", wrapText=True, autoHeight=True)
+gb.configure_selection(selection_mode="single", use_checkbox=True)
+grid_options = gb.build()
+
+# Display grid
+response = AgGrid(
+    df_raw[["Map_Id", "Preview"]],
+    gridOptions=grid_options,
+    update_mode=GridUpdateMode.SELECTION_CHANGED,
+    fit_columns_on_grid_load=True,
+    height=300
+)
+
+selected = response["selected_rows"]
+
+# Debug the selection
+st.subheader("🔍 Grid Selection Debug")
+st.write("Full Selection:", selected)
+if selected:
+    st.write("Type of selected[0]:", type(selected[0]))
+
+# Show full pseudocode
+if selected and isinstance(selected[0], dict):
+    selected_map_id = selected[0]["Map_Id"]
+    selected_row = df_raw[df_raw["Map_Id"] == selected_map_id]
+
+    if not selected_row.empty:
+        selected_row = selected_row.iloc[0]
+        st.markdown(f"### Map ID: `{selected_map_id}`")
+        with st.expander("📄 Full Pseudocode", expanded=True):
+            st.markdown(f"```\n{selected_row['Pseudocode']}\n```")
+    else:
+        st.warning("Map ID not found.")
+
+
 from st_aggrid import AgGrid, GridOptionsBuilder, GridUpdateMode
 
 df_raw["Map_Id"] = df_raw["Map_Id"].astype(str)  # ensure Map_Id is str
