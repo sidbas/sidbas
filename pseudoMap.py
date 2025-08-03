@@ -1,3 +1,21 @@
+if selected:
+    # Safely extract selected map_id
+    selected_map_id = selected[0].get("Map_Id")
+
+    # Match it in your full dataframe (use str() if necessary)
+    selected_row = df_raw[df_raw["Map_Id"] == selected_map_id]
+
+    if not selected_row.empty:
+        selected_row = selected_row.iloc[0]
+
+        st.markdown(f"### 🔍 Map ID: `{selected_map_id}`")
+
+        with st.expander("📄 Full Pseudocode", expanded=True):
+            st.markdown(format_pseudocode(selected_row["Pseudocode"]))
+    else:
+        st.warning("Selected row not found in full dataset.")
+
+
 import oracledb
 import pandas as pd
 
