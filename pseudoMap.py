@@ -1,3 +1,24 @@
+if selected:
+    first_row = selected[0]
+    st.write("DEBUG - First Row Type:", type(first_row))  # Check if dict or str
+
+    if isinstance(first_row, dict) and "Map_Id" in first_row:
+        selected_map_id = first_row["Map_Id"]
+        selected_row = df_raw[df_raw["Map_Id"] == selected_map_id]
+
+        if not selected_row.empty:
+            selected_row = selected_row.iloc[0]
+            st.markdown(f"### 🔍 Map ID: `{selected_map_id}`")
+            with st.expander("📄 Full Pseudocode", expanded=True):
+                st.markdown(format_pseudocode(selected_row["Pseudocode"]))
+        else:
+            st.warning("Map ID not found in the dataset.")
+    else:
+        st.error("Invalid selection format. Expected a dictionary.")
+        
+        
+
+
 from st_aggrid import AgGrid, GridOptionsBuilder, GridUpdateMode
 
 # Build grid options
