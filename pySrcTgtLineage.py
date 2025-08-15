@@ -1,6 +1,59 @@
 import cx_Oracle
 import pandas as pd
 
+def get_full_lineage_single_query(conn, target_table):
+    """
+    Recursively fetch full lineage for all fields of a target table
+    without multiple DB hits.
+    """
+    # 1️⃣ Pull the whole mapping table into memory
+    mapping_df = pd.read_sql("SELECT SOURCE_FIELD, TARGET_FIELD FROM MAP_SPEC", conn)
+    
+    # 2️⃣ Build an index: target_field -> list of source_fields
+    mapping_dict = mapping_df.groupby("TARGET_FIELD")["SOURCE_FIELD"].apply(list).to_dict()
+    
+    lineage_records = []
+    visited_tables = set()
+    
+    def recursive_trace(table, level=0):
+        """Internal recursive function"""
+        for target_field, source_list in mapping_dict.items():
+            if target_field.startswith(f"{table}."):
+                for source_field in source_list:
+                    lineage_records.append({
+                        "TARGET_FIELD": target_field,
+                        "SOURCE_FIELD": source_field,
+                        "LEVEL": level
+                    })
+                    
+                    # Recurse if source is table.column
+                    if "." in source_field:
+                        source_table = source_field.split(".")[0]
+                        if source_table not in visited_tables:
+                            visited_tables.add(source_table)
+                            recursive_trace(source_table, level + 1)
+    
+    # Start recursion from the given table
+    visited_tables.add(target_table)
+    recursive_trace(target_table)
+    
+    lineage_df = pd.DataFrame(lineage_records)
+    upstream_dict = lineage_df.groupby("TARGET_FIELD")["SOURCE_FIELD"].apply(list).to_dict()
+    
+    return lineage_df, upstream_dict
+
+# ------------------- Usage Example -------------------
+conn = cx_Oracle.connect("user/password@dsn")
+
+df_lineage, dict_lineage = get_full_lineage_single_query(conn, "CLIENT")
+
+print(df_lineage)
+print(dict_lineage)
+
+
+import cx_Oracle
+import pandas as pd
+
 def get_full_lineage(conn, target_table):
     """
     Recursively fetch full lineage for all fields of a target table.
