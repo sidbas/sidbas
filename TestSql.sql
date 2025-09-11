@@ -1,3 +1,14 @@
+SELECT RTRIM(
+         XMLAGG(
+             XMLELEMENT(e, '"' || column_name || '" AS "' || column_name || '",')
+             ORDER BY column_id
+         ).EXTRACT('//text()'), ','
+       ) AS col_list
+FROM all_tab_columns
+WHERE owner = 'YOUR_SCHEMA'
+  AND table_name = 'YOUR_TABLE';
+
+
 SELECT LISTAGG('"' || column_name || '" AS "' || column_name || '"', ', ')
        WITHIN GROUP (ORDER BY column_id) AS unpivot_list
 FROM all_tab_columns
