@@ -1,3 +1,35 @@
+WITH col_list AS (
+    SELECT RTRIM(
+             TO_CLOB(
+               XMLAGG(
+                 XMLELEMENT(e, '"' || column_name || '" AS "' || column_name || '",')
+                 ORDER BY column_id
+               ).getClobVal()
+             ),
+             ','
+           ) AS cols
+    FROM all_tab_columns
+    WHERE owner = 'YOUR_SCHEMA'      -- replace with schema
+      AND table_name = 'YOUR_TABLE'  -- replace with table
+)
+SELECT column_name
+FROM (
+    SELECT column_name, val
+    FROM your_schema.your_table
+    UNPIVOT (
+        val FOR column_name IN (
+            -- 👇 paste the output of col_list here
+            "COL1" AS "COL1",
+            "COL2" AS "COL2",
+            "COL3" AS "COL3"
+        )
+    )
+)
+GROUP BY column_name
+HAVING COUNT(val) = 0;
+
+
+
 SELECT RTRIM(
          TO_CLOB(
            XMLAGG(
