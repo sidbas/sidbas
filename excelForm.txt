@@ -1,3 +1,10 @@
+=LET(
+   arr, {"CdTrfTxInf","SttlmInf","PmtTpInf"},
+   res, IFNA(TEXTAFTER(A1, arr),""),
+   INDEX(res, MATCH(TRUE, res<>"",0))
+)
+
+
 =TEXTJOIN(CHAR(10), TRUE,
   MAP(TEXTSPLIT(SUBSTITUTE(A1,CHAR(13),""),,CHAR(10)),
       LAMBDA(line,
