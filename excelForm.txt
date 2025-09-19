@@ -1,4 +1,12 @@
 =LET(
+  t1, IFERROR(TEXTAFTER(A1,"CdTrfTxInf"),""),
+  t2, IFERROR(TEXTAFTER(A1,"SttlmInf"),""),
+  t3, IFERROR(TEXTAFTER(A1,"PmtTpInf"),""),
+  IF(t1<>"",t1, IF(t2<>"",t2, t3))
+)
+
+
+=LET(
    arr, {"CdTrfTxInf","SttlmInf","PmtTpInf"},
    res, IFNA(TEXTAFTER(A1, arr),""),
    INDEX(res, MATCH(TRUE, res<>"",0))
