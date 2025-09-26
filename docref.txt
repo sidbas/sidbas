@@ -1,0 +1,44 @@
+Before vs After Data Virtualization
+This document highlights the key differences between the traditional data integration approach (Before Data Virtualization) and the modern approach enabled by Data Virtualization (After).
+
+Aspect
+
+Before Data Virtualization
+
+After Data Virtualization
+
+Data Access & Integration
+
+Data stored in silos, heavy ETL/ELT needed, integration is slow.
+
+Unified logical data layer, real-time access across sources.
+
+Data Movement
+
+Data replication and physical movement required, storage-heavy.
+
+Minimal/no replication, queries run virtually across sources.
+
+Agility & Time-to-Insight
+
+Long development cycles, slow to adapt to changes.
+
+Faster development, real-time insights, agile to changes.
+
+Data Governance & Security
+
+Multiple copies make governance and security harder.
+
+Centralized governance, consistent access control.
+
+Performance
+
+Depends on central data warehouse design, latency from batch processes.
+
+Optimized queries, caching, near real-time access.
+
+Costs
+
+High infrastructure and ETL maintenance costs.
+
+Reduced storage and development costs, leaner operations.
