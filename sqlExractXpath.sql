@@ -73,3 +73,52 @@ FROM   my_table t,
            elem_name  VARCHAR2(200)  PATH 'name',
            elem_value VARCHAR2(4000) PATH 'value'
        ) x;
+
+SELECT x.full_path,
+       x.name,
+       x.value
+FROM   my_table t,
+       XMLTABLE(
+         XMLNAMESPACES(
+           DEFAULT 'urn:vity:iso:20022:pacs.008.001.09'
+         ),
+         '
+           for $n in /transaction//*[not(*)]                        (: leaf elements :)
+             return (
+               (: element text :)
+               <row>
+                 <path>{
+                   string-join(
+                     for $a in $n/ancestor-or-self::* 
+                     return concat("/", local-name($a)),
+                   "")
+                 }</path>
+                 <name>{local-name($n)}</name>
+                 <value>{normalize-space(string($n))}</value>
+               </row>,
+
+               (: element attributes :)
+               for $attr in $n/@*
+                 return
+                   <row>
+                     <path>{
+                       string-join(
+                         (
+                           for $a in $n/ancestor-or-self::* 
+                             return concat("/", local-name($a))
+                         ),
+                       "") || "@" || local-name($attr)
+                     }</path>
+                     <name>{local-name($attr)}</name>
+                     <value>{string($attr)}</value>
+                   </row>
+             )
+         '
+         PASSING t.xml_data
+         COLUMNS
+           full_path  VARCHAR2(1000) PATH 'path',
+           name       VARCHAR2(200)  PATH 'name',
+           value      VARCHAR2(4000) PATH 'value'
+       ) x;
+
+
