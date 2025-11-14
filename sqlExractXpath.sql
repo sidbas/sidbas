@@ -34,3 +34,19 @@ FROM   my_table t,
            tx_id         VARCHAR2(100) PATH 'TxId'
        ) x;
 
+SELECT
+  extract(value(x), 'local-name(.)').getStringVal() AS element_name,
+  extract(value(x), 'string(.)').getStringVal()      AS element_value
+FROM
+  my_table t,
+  TABLE(
+    XMLSequence(
+      extract(
+        t.xml_data,
+        'declare default element namespace "urn:vity:iso:20022:pacs.008.001.09";
+         //*[text()]'
+      )
+    )
+  ) x;
+
+
