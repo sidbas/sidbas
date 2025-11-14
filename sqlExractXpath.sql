@@ -17,3 +17,20 @@ SELECT XMLQuery(
          RETURNING CONTENT
        ).getStringVal() AS instr_id
 FROM my_table;
+
+SELECT x.instr_id,
+       x.end_to_end_id,
+       x.tx_id
+FROM   my_table t,
+       XMLTABLE(
+         XMLNAMESPACES(
+           DEFAULT 'urn:vity:iso:20022:pacs.008.001.09'
+         ),
+         '/transaction/CdtTrfTxInf/PmtId'
+         PASSING t.xml_data
+         COLUMNS
+           instr_id      VARCHAR2(100) PATH 'InstrId',
+           end_to_end_id VARCHAR2(100) PATH 'EndToEndId',
+           tx_id         VARCHAR2(100) PATH 'TxId'
+       ) x;
+
