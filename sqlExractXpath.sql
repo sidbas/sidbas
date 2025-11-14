@@ -1,0 +1,19 @@
+SELECT x.instr_id
+FROM   my_table t,
+       XMLTABLE(
+         XMLNAMESPACES(
+           DEFAULT 'urn:vity:iso:20022:pacs.008.001.09'
+         ),
+         '/transaction/CdtTrfTxInf/PmtId'
+         PASSING t.xml_data
+         COLUMNS
+           instr_id VARCHAR2(100) PATH 'InstrId'
+       ) x;
+
+SELECT XMLQuery(
+         'declare default element namespace "urn:vity:iso:20022:pacs.008.001.09";
+          /transaction/CdtTrfTxInf/PmtId/InstrId/text()'
+         PASSING xml_data
+         RETURNING CONTENT
+       ).getStringVal() AS instr_id
+FROM my_table;
