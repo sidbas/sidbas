@@ -49,4 +49,25 @@ FROM
     )
   ) x;
 
+SELECT
+    x.elem_name,
+    x.elem_value
+FROM my_table t,
+     XMLTABLE(
+       XMLNAMESPACES(
+         DEFAULT 'urn:vity:iso:20022:pacs.008.001.09'
+       ),
+       'for $n in /transaction//*[text()]
+        return
+          <row>
+            <name>{local-name($n)}</name>
+            <value>{string($n)}</value>
+          </row>'
+       PASSING t.xml_data
+       COLUMNS
+         elem_name  VARCHAR2(200) PATH 'name',
+         elem_value VARCHAR2(4000) PATH 'value'
+     ) x;
+
+
 
