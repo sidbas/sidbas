@@ -1,0 +1,1 @@
+https://learn.mongodb.com/learn/course/relational-to-document-model-on-demand-sa-onetoone-20251120-bank-of-america/relational-to-document-model/skill-check
