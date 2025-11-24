@@ -1,3 +1,19 @@
+DECLARE
+  v_xsd CLOB := :xsd_clob;   -- bind variable
+BEGIN
+  INSERT INTO iso_xsd_repository
+    (msg_family, version_no, schema_namespace, file_name, xsd_content)
+  VALUES
+    ('pacs.008', '001.10',
+     'urn:iso:std:iso:20022:tech:xsd:pacs.008.001.10',
+     'pacs.008.001.10.xsd',
+     XMLTYPE(v_xsd));
+
+  COMMIT;
+END;
+/
+
+
 CREATE TABLE iso_xsd_repository (
     xsd_id            NUMBER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
 
