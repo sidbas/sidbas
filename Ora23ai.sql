@@ -33,3 +33,14 @@ CREATE TABLE iso_xsd_repository (
     CONSTRAINT fk_xsd_parent
         FOREIGN KEY (parent_xsd_id) REFERENCES iso_xsd_repository(xsd_id)
 );
+
+INSERT INTO iso_xsd_repository
+    (msg_family, version_no, schema_namespace, root_element, xsd_content, file_name)
+VALUES
+    ('pacs.008', '001.10',
+     'urn:iso:std:iso:20022:tech:xsd:pacs.008.001.10',
+     'Document',
+     XMLTYPE(bfilename('XSD_DIR', 'pacs.008.001.10.xsd'), nls_charset_id('AL32UTF8')),
+     'pacs.008.001.10.xsd');
+
+
