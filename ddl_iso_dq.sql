@@ -14,6 +14,51 @@ BEGIN
                JSON_OBJECT(
                     'path'      VALUE r.path,
                     'required'  VALUE r.required,
+                    'exists'    VALUE EXISTSNode(XMLTYPE(p_xml_msg), r.path),
+                    'valid'     VALUE 
+                        CASE 
+                            WHEN r.required = 1 AND EXISTSNode(XMLTYPE(p_xml_msg), r.path) = 0
+                                THEN 'missing'
+                            ELSE 'ok'
+                        END
+               )
+           RETURNING CLOB
+           )
+    INTO l_result
+    FROM JSON_TABLE(
+        l_rules_json,
+        '$.rules[*]'
+        COLUMNS (
+            path      VARCHAR2(400) PATH '$.path',
+            required  NUMBER        PATH '$.required'
+        )
+    ) r;
+
+    RETURN l_result;
+END;
+/
+
+SHOW ERRORS FUNCTION EXISTSNODE;
+SHOW ERRORS FUNCTION VALIDATE_ISO_MESSAGE;
+
+
+
+CREATE OR REPLACE FUNCTION validate_iso_message (
+    p_xml_msg  IN CLOB,
+    p_xsd_name IN VARCHAR2
+) RETURN CLOB
+AS
+    l_rules_json CLOB;
+    l_result     CLOB;
+BEGIN
+    SELECT rule_json INTO l_rules_json
+    FROM iso_dq_rules
+    WHERE xsd_name = p_xsd_name;
+
+    SELECT JSON_ARRAYAGG(
+               JSON_OBJECT(
+                    'path'      VALUE r.path,
+                    'required'  VALUE r.required,
                     'exists'    VALUE 
                         EXISTSNode(XMLTYPE(p_xml_msg), r.path) FORMAT JSON,
                     'valid'     VALUE 
