@@ -1,3 +1,20 @@
+-- 1. What xsd names are available in rules table?
+SELECT DISTINCT xsd_name FROM iso_dq_rules ORDER BY 1;
+
+-- 2. What xsd names are present in messages table?
+SELECT DISTINCT xsd_name FROM iso_messages ORDER BY 1;
+
+-- 3. Which message xsd_name values have no matching rule?
+SELECT DISTINCT m.xsd_name
+FROM iso_messages m
+MINUS
+SELECT DISTINCT r.xsd_name
+FROM iso_dq_rules r;
+
+
+
+
+
 CREATE OR REPLACE FUNCTION validate_iso_message (
     p_xml_msg  IN CLOB,
     p_xsd_name IN VARCHAR2
