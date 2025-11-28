@@ -3,6 +3,102 @@ CREATE OR REPLACE FUNCTION validate_iso_message (
     p_xsd_name IN VARCHAR2
 ) RETURN CLOB
 AS
+    l_rules_json   CLOB;
+    l_missing_rules CLOB;
+    l_result       CLOB;
+    l_err          VARCHAR2(4000);
+BEGIN
+    --------------------------------------------------------------------
+    -- 1. Try to load rules for this XSD
+    --------------------------------------------------------------------
+    BEGIN
+        SELECT rule_json
+        INTO l_rules_json
+        FROM iso_dq_rules
+        WHERE xsd_name = p_xsd_name;
+    EXCEPTION
+        WHEN NO_DATA_FOUND THEN
+            -- Build error JSON in SQL using variables, not SQLERRM
+            SELECT TO_CLOB(
+                       JSON_OBJECT(
+                           'error'           VALUE 'no rules found for xsd_name',
+                           'xsd_name'        VALUE p_xsd_name,
+                           'available_rules' VALUE (
+                               SELECT JSON_ARRAYAGG(xsd_name)
+                               FROM iso_dq_rules
+                           )
+                       )
+                   )
+            INTO l_missing_rules
+            FROM dual;
+
+            RETURN l_missing_rules;
+    END;
+
+    --------------------------------------------------------------------
+    -- 2. Produce validation output
+    --------------------------------------------------------------------
+    SELECT TO_CLOB(
+               JSON_ARRAYAGG(
+                   JSON_OBJECT(
+                       'path'      VALUE r.path,
+                       'required'  VALUE r.required,
+                       'exists'    VALUE EXISTSNode(
+                                        XMLTYPE(p_xml_msg),
+                                        CASE WHEN SUBSTR(r.path,1,1)='/' 
+                                             THEN r.path ELSE '/'||r.path END
+                                    ),
+                       'valid'     VALUE
+                           CASE
+                               WHEN r.required = 1
+                                    AND EXISTSNode(
+                                            XMLTYPE(p_xml_msg),
+                                            CASE WHEN SUBSTR(r.path,1,1)='/' 
+                                                 THEN r.path ELSE '/'||r.path END
+                                        ) = 0
+                               THEN 'missing'
+                               ELSE 'ok'
+                           END
+                   )
+               )
+           )
+    INTO l_result
+    FROM JSON_TABLE(
+        l_rules_json,
+        '$.rules[*]'
+        COLUMNS (
+            path      VARCHAR2(400) PATH '$.path',
+            required  NUMBER        PATH '$.required'
+        )
+    ) r;
+
+    RETURN l_result;
+
+EXCEPTION
+    WHEN OTHERS THEN
+        -- Capture SQLERRM safely into PL/SQL variable
+        l_err := SQLERRM;
+
+        -- Build JSON using l_err (safe)
+        SELECT TO_CLOB(
+                   JSON_OBJECT(
+                       'error' VALUE l_err
+                   )
+               )
+        INTO l_result
+        FROM dual;
+
+        RETURN l_result;
+END;
+/
+
+
+
+CREATE OR REPLACE FUNCTION validate_iso_message (
+    p_xml_msg  IN CLOB,
+    p_xsd_name IN VARCHAR2
+) RETURN CLOB
+AS
     l_rules_json CLOB;
     l_missing_rules CLOB;
     l_result CLOB;
