@@ -1,3 +1,115 @@
+import re
+from lxml import etree
+
+# -----------------------------------------------------------
+# 1. Fallback: Raw existence check using regex
+# -----------------------------------------------------------
+def fallback_raw_exists(xml_str, tag_name):
+    """
+    Check if <tag> exists anywhere in the raw XML.
+    Namespace prefixes are ignored.
+    """
+    pattern = fr"<(?:\w+:)?{tag_name}\b[^>]*>.*?</(?:\w+:)?{tag_name}>"
+    return bool(re.search(pattern, xml_str, flags=re.DOTALL))
+
+
+# -----------------------------------------------------------
+# 2. Fallback: Check tag under its parent using regex
+# -----------------------------------------------------------
+def fallback_raw_parent_child(xml_str, parent_tag, child_tag):
+    """
+    Detect <parent><child>...</child></parent> structure in malformed XML.
+    Namespace prefixes are ignored.
+    """
+    pattern = fr"<(?:\w+:)?{parent_tag}\b[^>]*>.*?<(?:\w+:)?{child_tag}\b"
+    return bool(re.search(pattern, xml_str, flags=re.DOTALL))
+
+
+# -----------------------------------------------------------
+# 3. Enhanced existence checker for DQ rules
+# -----------------------------------------------------------
+def dq_xpath_exists(xml_str, xpath, ns_map):
+    """
+    RETURN STRUCTURED INFORMATION:
+    {
+        "exists": 0/1,
+        "parent_exists": 0/1,
+        "in_correct_location": 0/1,
+        "reason": "..."
+    }
+    """
+
+    # --------------------------------------------
+    # PART A: Split the path for deep analysis
+    # --------------------------------------------
+    parts = xpath.strip("/").split("/")
+    tag = parts[-1]                   # final tag
+    parent = parts[-2] if len(parts) > 1 else None
+
+    # --------------------------------------------
+    # PART B: Try proper XML parsing first
+    # --------------------------------------------
+    try:
+        root = etree.fromstring(xml_str.encode("utf-8"))
+        nodes = root.xpath(xpath, namespaces=ns_map)
+
+        if nodes:
+            return {
+                "exists": 1,
+                "parent_exists": 1,
+                "in_correct_location": 1,
+                "reason": "OK (XML well-formed and path matches)"
+            }
+        else:
+            # Tag not found through XML parsing
+            return {
+                "exists": 0,
+                "parent_exists": 1 if parent and root.xpath(f"//{parent}", namespaces=ns_map) else 0,
+                "in_correct_location": 0,
+                "reason": "Tag missing in well-formed XML"
+            }
+
+    except etree.XMLSyntaxError:
+        # XML is malformed — fallback mode
+        pass
+
+    # --------------------------------------------
+    # PART C: Fallback for malformed XML
+    # --------------------------------------------
+
+    raw_exists = fallback_raw_exists(xml_str, tag)
+
+    if not raw_exists:
+        return {
+            "exists": 0,
+            "parent_exists": 0,
+            "in_correct_location": 0,
+            "reason": "Tag not found (malformed XML, raw search failed)"
+        }
+
+    # Tag exists → check parent
+    if parent:
+        parent_exists = fallback_raw_exists(xml_str, parent)
+        correct_location = fallback_raw_parent_child(xml_str, parent, tag)
+    else:
+        parent_exists = 1
+        correct_location = 1
+
+    reason = "Tag found in malformed XML"
+    if not correct_location:
+        reason = "Tag found but not under expected parent"
+
+    return {
+        "exists": 1,
+        "parent_exists": 1 if parent_exists else 0,
+        "in_correct_location": 1 if correct_location else 0,
+        "reason": reason
+    }
+    
+
+
+
+
 import json
 from lxml import etree
 import oracledb
