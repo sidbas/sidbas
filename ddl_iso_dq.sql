@@ -4,6 +4,86 @@ CREATE OR REPLACE FUNCTION validate_iso_message (
 ) RETURN CLOB
 AS
     l_rules_json   CLOB;
+    l_result       CLOB;
+    l_err          VARCHAR2(4000);
+    l_ns           VARCHAR2(4000);
+BEGIN
+    l_result := EMPTY_CLOB(); -- initialize empty CLOB
+
+    -- Extract default namespace
+    l_ns := REGEXP_SUBSTR(p_xml_msg,'xmlns\s*=\s*"(.*?)"',1,1,NULL,1);
+    IF l_ns IS NULL THEN
+        l_ns := REGEXP_SUBSTR(p_xml_msg,'xmlns\s*=\s*''(.*?)''',1,1,NULL,1);
+    END IF;
+
+    -- Load rules
+    BEGIN
+        SELECT rule_json INTO l_rules_json
+        FROM iso_dq_rules
+        WHERE xsd_name = p_xsd_name;
+    EXCEPTION
+        WHEN NO_DATA_FOUND THEN
+            RETURN TO_CLOB('{"error":"No rules found for XSD","xsd_name":"' || p_xsd_name || '"}');
+    END;
+
+    -- Start JSON array
+    DBMS_LOB.APPEND(l_result,'[');
+    DECLARE
+        l_first BOOLEAN := TRUE;
+    BEGIN
+        FOR r IN (
+            SELECT path, required
+            FROM JSON_TABLE(
+                l_rules_json,
+                '$.rules[*]'
+                COLUMNS (
+                    path     CLOB PATH '$.path',
+                    required NUMBER PATH '$.required'
+                )
+            )
+        ) LOOP
+            IF NOT l_first THEN
+                DBMS_LOB.APPEND(l_result,',');
+            ELSE
+                l_first := FALSE;
+            END IF;
+
+            DBMS_LOB.APPEND(l_result,
+                '{"path":"' || REPLACE(r.path,'"','\"') || '"' ||
+                ',"required":' || NVL(TO_CHAR(r.required),'null') ||
+                ',"exists":' || EXISTSNode_NS(XMLTYPE(p_xml_msg),
+                                              CASE WHEN SUBSTR(r.path,1,1)='/' THEN r.path ELSE '/'||r.path END,
+                                              l_ns) ||
+                ',"valid":"' || CASE
+                                    WHEN r.required = 1 AND 
+                                         EXISTSNode_NS(XMLTYPE(p_xml_msg),
+                                                       CASE WHEN SUBSTR(r.path,1,1)='/' THEN r.path ELSE '/'||r.path END,
+                                                       l_ns) = 0
+                                    THEN 'missing'
+                                    ELSE 'ok'
+                                 END || '"}'
+            );
+        END LOOP;
+    END;
+
+    DBMS_LOB.APPEND(l_result,']'); -- close JSON array
+
+    RETURN l_result;
+
+EXCEPTION
+    WHEN OTHERS THEN
+        l_err := SQLERRM;
+        RETURN TO_CLOB('{"error":"' || l_err || '"}');
+END;
+/
+
+
+CREATE OR REPLACE FUNCTION validate_iso_message (
+    p_xml_msg  IN CLOB,
+    p_xsd_name IN VARCHAR2
+) RETURN CLOB
+AS
+    l_rules_json   CLOB;
     l_result       CLOB := '[';  -- start JSON array
     l_err          VARCHAR2(4000);
     l_ns           VARCHAR2(4000);
