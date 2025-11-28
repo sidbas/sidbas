@@ -107,7 +107,17 @@ def dq_xpath_exists(xml_str, xpath, ns_map):
     }
     
 
+res = dq_xpath_exists(xml_payload, xpath_expr, ns_map)
 
+dq_report.append({
+    "path": path,
+    "required": int(required),
+    "exists": res["exists"],
+    "parent_exists": res["parent_exists"],
+    "in_correct_location": res["in_correct_location"],
+    "valid": "ok" if (res["exists"] and res["in_correct_location"]) else "fail",
+    "reason": res["reason"]
+})
 
 
 import json
