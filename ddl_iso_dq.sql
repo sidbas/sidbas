@@ -1,3 +1,141 @@
+CREATE OR REPLACE FUNCTION EXISTSNode_NS(
+    p_xml    IN XMLTYPE,
+    p_xpath  IN VARCHAR2,
+    p_ns_uri IN VARCHAR2
+) RETURN NUMBER
+AS
+    cnt      NUMBER := 0;
+    l_xpath  VARCHAR2(4000);
+    sql_stmt VARCHAR2(4000);
+BEGIN
+    IF p_xpath IS NULL OR TRIM(p_xpath) = '' THEN
+        RETURN 0;
+    END IF;
+
+    -- Ensure leading slash
+    IF SUBSTR(p_xpath,1,1) <> '/' THEN
+        l_xpath := '/' || p_xpath;
+    ELSE
+        l_xpath := p_xpath;
+    END IF;
+
+    -- If namespace URI provided, prefix each element step with ns:
+    IF p_ns_uri IS NOT NULL THEN
+        -- Insert ns: prefix before each local-name after slash or at start.
+        -- Use regexp_replace to transform "/A/B" into "/ns:A/ns:B"
+        l_xpath := REGEXP_REPLACE(l_xpath, '(^|/)([^/]+)', '\1ns:\2');
+        -- Build SQL using XMLNAMESPACES to bind prefix "ns" to the URI
+        sql_stmt := 'SELECT COUNT(*) FROM XMLTABLE(XMLNAMESPACES(''' 
+                    || p_ns_uri || ''' as "ns"), ''' || l_xpath || ''' PASSING :xml)';
+    ELSE
+        -- No namespace - normal xpath
+        sql_stmt := 'SELECT COUNT(*) FROM XMLTABLE(''' 
+                    || l_xpath || ''' PASSING :xml)';
+    END IF;
+
+    EXECUTE IMMEDIATE sql_stmt INTO cnt USING p_xml;
+    RETURN CASE WHEN cnt > 0 THEN 1 ELSE 0 END;
+
+EXCEPTION
+    WHEN OTHERS THEN
+        -- On error, return 0 (existence check fails); caller may choose to surface errors.
+        RETURN 0;
+END;
+/
+
+CREATE OR REPLACE FUNCTION validate_iso_message (
+    p_xml_msg  IN CLOB,
+    p_xsd_name IN VARCHAR2
+) RETURN CLOB
+AS
+    l_rules_json   CLOB;
+    l_result       CLOB;
+    l_err          VARCHAR2(4000);
+    l_ns           VARCHAR2(4000);
+BEGIN
+    --------------------------------------------------------------------
+    -- 0. Extract default namespace URI from XML text (robust to " or ')
+    --------------------------------------------------------------------
+    -- Try to extract xmlns="..." first
+    l_ns := REGEXP_SUBSTR(p_xml_msg, 'xmlns\s*=\s*"(.*?)"', 1, 1, NULL, 1);
+
+    -- If not found, try single-quoted version
+    IF l_ns IS NULL THEN
+        l_ns := REGEXP_SUBSTR(p_xml_msg, 'xmlns\s*=\s*''(.*?)''', 1, 1, NULL, 1);
+    END IF;
+
+    --------------------------------------------------------------------
+    -- 1. Load rules JSON safely
+    --------------------------------------------------------------------
+    BEGIN
+        SELECT rule_json
+        INTO l_rules_json
+        FROM iso_dq_rules
+        WHERE xsd_name = p_xsd_name;
+    EXCEPTION
+        WHEN NO_DATA_FOUND THEN
+            SELECT TO_CLOB(
+                       JSON_OBJECT(
+                           'error'           VALUE 'no rules found for xsd_name',
+                           'xsd_name'        VALUE p_xsd_name,
+                           'available_rules' VALUE (
+                               SELECT JSON_ARRAYAGG(xsd_name) FROM iso_dq_rules
+                           )
+                       ) RETURNING CLOB
+                   )
+            INTO l_result
+            FROM dual;
+            RETURN l_result;
+    END;
+
+    --------------------------------------------------------------------
+    -- 2. Build DQ report (namespace-aware)
+    --    Use JSON_OBJECT / JSON_ARRAYAGG with RETURNING CLOB to avoid size limits
+    --------------------------------------------------------------------
+    SELECT JSON_ARRAYAGG(
+               JSON_OBJECT(
+                   'path'      VALUE r.path RETURNING CLOB,
+                   'required'  VALUE r.required,
+                   'exists'    VALUE EXISTSNode_NS(XMLTYPE(p_xml_msg),
+                                                   CASE WHEN SUBSTR(r.path,1,1)='/' THEN r.path ELSE '/'||r.path END,
+                                                   l_ns),
+                   'valid'     VALUE CASE
+                                       WHEN r.required = 1
+                                            AND EXISTSNode_NS(XMLTYPE(p_xml_msg),
+                                                              CASE WHEN SUBSTR(r.path,1,1)='/' THEN r.path ELSE '/'||r.path END,
+                                                              l_ns) = 0
+                                       THEN 'missing'
+                                       ELSE 'ok'
+                                   END
+               RETURNING CLOB
+               )
+           RETURNING CLOB
+    INTO l_result
+    FROM JSON_TABLE(
+        l_rules_json,
+        '$.rules[*]'
+        COLUMNS (
+            path      VARCHAR2(400) PATH '$.path',
+            required  NUMBER        PATH '$.required'
+        )
+    ) r;
+
+    RETURN l_result;
+
+EXCEPTION
+    WHEN OTHERS THEN
+        l_err := SQLERRM;
+        SELECT TO_CLOB(JSON_OBJECT('error' VALUE l_err) RETURNING CLOB)
+        INTO l_result
+        FROM dual;
+        RETURN l_result;
+END;
+/
+
+
+
+
+
     SELECT JSON_ARRAYAGG(
                JSON_OBJECT(
                    'path'      VALUE r.path,
