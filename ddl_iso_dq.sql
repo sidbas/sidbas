@@ -1,3 +1,128 @@
+CREATE OR REPLACE FUNCTION validate_iso_message (
+    p_xml_msg  IN CLOB,
+    p_xsd_name IN VARCHAR2
+) RETURN CLOB
+AS
+    l_rules_json   CLOB;
+    l_result       CLOB;
+    l_err          VARCHAR2(4000);
+    l_ns           VARCHAR2(4000);
+BEGIN
+    --------------------------------------------------------------------
+    -- 1. Extract default namespace from XML
+    --------------------------------------------------------------------
+    l_ns := REGEXP_SUBSTR(
+                p_xml_msg,
+                'xmlns\s*=\s*"(.*?)"',
+                1, 1, NULL, 1
+            );
+
+    IF l_ns IS NULL THEN
+        l_ns := REGEXP_SUBSTR(
+                    p_xml_msg,
+                    'xmlns\s*=\s*''(.*?)''',
+                    1, 1, NULL, 1
+                );
+    END IF;
+
+    --------------------------------------------------------------------
+    -- 2. Fetch rules JSON safely
+    --------------------------------------------------------------------
+    BEGIN
+        SELECT rule_json
+        INTO l_rules_json
+        FROM iso_dq_rules
+        WHERE xsd_name = p_xsd_name;
+    EXCEPTION
+        WHEN NO_DATA_FOUND THEN
+            -- Build error JSON using TO_CLOB
+            l_result := TO_CLOB('{"error":"No rules found for XSD","xsd_name":"' || p_xsd_name || '"}');
+            RETURN l_result;
+    END;
+
+    --------------------------------------------------------------------
+    -- 3. Build DQ Report JSON safely in PL/SQL
+    --------------------------------------------------------------------
+    SELECT TO_CLOB(
+               JSON_ARRAYAGG(
+                   JSON_OBJECT(
+                       'path'     VALUE r.path,
+                       'required' VALUE r.required,
+                       'exists'   VALUE EXISTSNode_NS(
+                                       XMLTYPE(p_xml_msg),
+                                       CASE WHEN SUBSTR(r.path,1,1)='/' THEN r.path ELSE '/'||r.path END,
+                                       l_ns
+                                   ),
+                       'valid'    VALUE CASE
+                                           WHEN r.required = 1 AND
+                                                EXISTSNode_NS(
+                                                    XMLTYPE(p_xml_msg),
+                                                    CASE WHEN SUBSTR(r.path,1,1)='/' THEN r.path ELSE '/'||r.path END,
+                                                    l_ns
+                                                ) = 0
+                                           THEN 'missing'
+                                           ELSE 'ok'
+                                       END
+                   )
+               )
+           )
+    INTO l_result
+    FROM JSON_TABLE(
+            l_rules_json,
+            '$.rules[*]'
+            COLUMNS (
+                path      VARCHAR2(400) PATH '$.path',
+                required  NUMBER        PATH '$.required'
+            )
+         ) r;
+
+    RETURN l_result;
+
+EXCEPTION
+    WHEN OTHERS THEN
+        l_err := SQLERRM;
+        l_result := TO_CLOB('{"error":"' || l_err || '"}');
+        RETURN l_result;
+END;
+/
+
+
+SELECT
+    JSON_ARRAYAGG(
+        JSON_OBJECT(
+            'path'     VALUE r.path,
+            'required' VALUE r.required,
+            'exists'   VALUE EXISTSNode_NS(
+                            XMLTYPE(p_xml_msg),
+                            CASE WHEN SUBSTR(r.path,1,1)='/' THEN r.path ELSE '/'||r.path END,
+                            l_ns
+                        ),
+            'valid'    VALUE CASE
+                                WHEN r.required = 1 AND
+                                     EXISTSNode_NS(
+                                         XMLTYPE(p_xml_msg),
+                                         CASE WHEN SUBSTR(r.path,1,1)='/' THEN r.path ELSE '/'||r.path END,
+                                         l_ns
+                                     ) = 0
+                                THEN 'missing'
+                                ELSE 'ok'
+                             END
+        )
+        RETURNING CLOB
+    )
+INTO l_result
+FROM JSON_TABLE(
+        l_rules_json,
+        '$.rules[*]'
+        COLUMNS (
+            path     VARCHAR2(400) PATH '$.path',
+            required NUMBER        PATH '$.required'
+        )
+    ) r;
+
+
+
+
 CREATE OR REPLACE FUNCTION EXISTSNode_NS(
     p_xml    IN XMLTYPE,
     p_xpath  IN VARCHAR2,
