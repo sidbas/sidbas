@@ -1,3 +1,39 @@
+    SELECT JSON_ARRAYAGG(
+               JSON_OBJECT(
+                   'path'      VALUE r.path,
+                   'required'  VALUE r.required,
+                   'exists'    VALUE EXISTSNode(
+                                    XMLTYPE(p_xml_msg),
+                                    CASE WHEN SUBSTR(r.path,1,1)='/' 
+                                         THEN r.path ELSE '/'||r.path END
+                                ),
+                   'valid'     VALUE
+                       CASE
+                           WHEN r.required = 1
+                                AND EXISTSNode(
+                                        XMLTYPE(p_xml_msg),
+                                        CASE WHEN SUBSTR(r.path,1,1)='/' 
+                                             THEN r.path ELSE '/'||r.path END
+                                    ) = 0
+                           THEN 'missing'
+                           ELSE 'ok'
+                       END
+               RETURNING CLOB)
+           RETURNING CLOB)
+    INTO l_result
+    FROM JSON_TABLE(
+        l_rules_json,
+        '$.rules[*]'
+        COLUMNS (
+            path      VARCHAR2(400) PATH '$.path',
+            required  NUMBER        PATH '$.required'
+        )
+    ) r;
+
+
+
+
+
 CREATE OR REPLACE FUNCTION validate_iso_message (
     p_xml_msg  IN CLOB,
     p_xsd_name IN VARCHAR2
