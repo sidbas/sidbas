@@ -1,3 +1,346 @@
+#!/usr/bin/env python3
+"""
+ISO20022 DQ validator with auto-repair for malformed XML.
+Writes per-message DQ JSON into iso_message_dq_report.
+
+Author: ChatGPT
+"""
+
+import re
+import json
+import traceback
+from lxml import etree
+import oracledb
+
+# -------------------------
+# CONFIG - edit these
+# -------------------------
+DB_USER = "YOUR_USER"
+DB_PASS = "YOUR_PASS"
+DB_DSN  = "YOUR_HOST:1521/YOUR_SERVICE"
+
+BATCH_COMMIT = 100  # how many messages to process before commit
+DRY_RUN = False     # if True, don't write to DB (useful for testing)
+
+# -------------------------
+# DB connection
+# -------------------------
+def get_connection():
+    return oracledb.connect(user=DB_USER, password=DB_PASS, dsn=DB_DSN)
+
+# -------------------------
+# Utility: read possible LOB to string
+# -------------------------
+def lob_to_str(maybe_lob):
+    if maybe_lob is None:
+        return None
+    if hasattr(maybe_lob, "read"):
+        return maybe_lob.read()
+    return str(maybe_lob)
+
+# -------------------------
+# LEVEL 1: sanitize incoming raw XML string
+# - remove BOM
+# - extract first <Document>...</Document> chunk if possible
+# -------------------------
+def sanitize_xml(xml_str):
+    if xml_str is None:
+        return None
+    s = xml_str.lstrip("\ufeff").strip()
+    # If there's at least one <Document tag, prefer the first <Document>...</Document> block
+    if "<Document" in s:
+        start = s.find("<Document")
+        # find last closing </Document> after start
+        end = s.rfind("</Document>")
+        if end != -1 and end > start:
+            end = end + len("</Document>")
+            s = s[start:end]
+        else:
+            # if no closing tag found, keep from start to end (repair step will attempt to recover)
+            s = s[start:]
+    return s
+
+# -------------------------
+# LEVEL 2: attempt strict parse, then recover parse if needed
+# Returns: (root_element_or_None, status_string, repaired_xml_string_or_original)
+# status_string: "OK", "REPAIRED", "UNRECOVERABLE"
+# -------------------------
+def repair_and_parse(xml_str):
+    if not xml_str:
+        return None, "UNRECOVERABLE: empty", None
+
+    # Try strict parse first
+    try:
+        root = etree.fromstring(xml_str.encode("utf-8"))
+        return root, "OK", xml_str
+    except etree.XMLSyntaxError:
+        pass
+
+    # Try lxml recovery mode (best-effort)
+    try:
+        parser = etree.XMLParser(recover=True, remove_comments=False)
+        root = etree.fromstring(xml_str.encode("utf-8"), parser)
+        # get a serialized repaired XML (unicode)
+        repaired = etree.tostring(root, encoding="unicode")
+        return root, "REPAIRED", repaired
+    except Exception as e:
+        return None, f"UNRECOVERABLE: {str(e)}", None
+
+# -------------------------
+# LEVEL 3: normalize default namespace (if desired)
+# This function rewrites element tags to ensure consistent namespace usage.
+# Note: It returns a new Element whose tags are bound to the supplied ns (if given).
+# -------------------------
+def normalize_namespaces(root, target_ns_uri):
+    if root is None or not target_ns_uri:
+        return root
+    # Create new tree with same structure but tags bound to target_ns_uri
+    def rewrite(elem):
+        local = etree.QName(elem).localname
+        new_tag = f"{{{target_ns_uri}}}{local}"
+        new_elem = etree.Element(new_tag)
+        # copy attributes (ignoring namespace declarations)
+        for k, v in elem.attrib.items():
+            new_elem.set(k, v)
+        # copy text and children recursively
+        if elem.text:
+            new_elem.text = elem.text
+        for child in elem:
+            new_child = rewrite(child)
+            new_elem.append(new_child)
+        if elem.tail:
+            new_elem.tail = elem.tail
+        return new_elem
+
+    return rewrite(root)
+
+# -------------------------
+# Fallback regex-based checks for malformed XML
+# -------------------------
+def fallback_raw_exists(xml_str, tag_name):
+    pattern = fr"<(?:\w+:)?{re.escape(tag_name)}\b[^>]*>.*?</(?:\w+:)?{re.escape(tag_name)}>"
+    return bool(re.search(pattern, xml_str, flags=re.DOTALL | re.IGNORECASE))
+
+def fallback_raw_parent_child(xml_str, parent_tag, child_tag):
+    pattern = fr"<(?:\w+:)?{re.escape(parent_tag)}\b[^>]*>.*?<(?:\w+:)?{re.escape(child_tag)}\b"
+    return bool(re.search(pattern, xml_str, flags=re.DOTALL | re.IGNORECASE))
+
+# -------------------------
+# DQ existence checker (namespace-aware; falls back when XML malformed)
+# Returns dict with detailed info
+# -------------------------
+def dq_xpath_exists(xml_str, xpath, ns_map):
+    """
+    Returns:
+      {
+        'exists': 0/1,
+        'parent_exists': 0/1,
+        'in_correct_location': 0/1,
+        'reason': '...'
+      }
+    """
+    parts = xpath.strip("/").split("/")
+    tag = parts[-1] if parts else xpath
+    parent = parts[-2] if len(parts) > 1 else None
+
+    # Try proper parsing & XPath
+    try:
+        root = etree.fromstring(xml_str.encode("utf-8"))
+        nodes = root.xpath(xpath, namespaces=ns_map)
+        if nodes:
+            return {'exists': 1, 'parent_exists': 1, 'in_correct_location': 1, 'reason': 'OK (well-formed XML)'}
+        else:
+            # check parent existence
+            parent_exists = 0
+            if parent:
+                parent_exists = 1 if root.xpath("//" + parent, namespaces=ns_map) else 0
+            return {'exists': 0, 'parent_exists': parent_exists, 'in_correct_location': 0, 'reason': 'Tag missing in well-formed XML'}
+    except etree.XMLSyntaxError:
+        # fallback mode
+        raw_exists = fallback_raw_exists(xml_str, tag)
+        if not raw_exists:
+            return {'exists': 0, 'parent_exists': 0, 'in_correct_location': 0, 'reason': 'Tag not found (malformed XML)'}
+        parent_exists = 1 if (parent and fallback_raw_exists(xml_str, parent)) else (1 if not parent else 0)
+        correct_location = 1 if (parent and fallback_raw_parent_child(xml_str, parent, tag)) else (1 if not parent else 0)
+        reason = 'Tag found in malformed XML'
+        if not correct_location:
+            reason = 'Tag found but not under expected parent'
+        return {'exists': 1, 'parent_exists': 1 if parent_exists else 0, 'in_correct_location': 1 if correct_location else 0, 'reason': reason}
+    except Exception as e:
+        return {'exists': 0, 'parent_exists': 0, 'in_correct_location': 0, 'reason': f'Error in XPath eval: {str(e)}'}
+
+# -------------------------
+# Helper: convert rule keys flexibly
+# Accepts rules where path may be 'path' or 'xpath', and required may be 'required' or 'minOccurs'.
+# -------------------------
+def normalize_rule(rule):
+    path = rule.get("path") or rule.get("xpath") or rule.get("element") or rule.get("field")
+    # prefer explicit required boolean/int; fall back to minOccurs
+    required = None
+    if "required" in rule:
+        required = int(bool(rule.get("required")))
+    elif "minOccurs" in rule:
+        try:
+            required = 1 if int(rule.get("minOccurs", 0)) > 0 else 0
+        except Exception:
+            required = 0
+    elif "mandatory" in rule:
+        required = 1 if rule.get("mandatory") else 0
+    else:
+        required = 0
+    return path, required
+
+# -------------------------
+# Main processor
+# -------------------------
+def process_all_messages():
+    conn = get_connection()
+    cur = conn.cursor()
+
+    # ensure DQ table exists - try to create if not present (safe attempt)
+    try:
+        cur.execute("""
+        BEGIN
+            EXECUTE IMMEDIATE 'CREATE TABLE iso_message_dq_report (
+                msg_id VARCHAR2(64) PRIMARY KEY,
+                dq_report CLOB,
+                created_at TIMESTAMP DEFAULT SYSTIMESTAMP
+            )';
+        EXCEPTION WHEN OTHERS THEN
+            IF SQLCODE != -955 THEN RAISE; END IF; -- ORA-00955: name already used by an existing object
+        END;
+        """)
+        conn.commit()
+    except Exception:
+        # ignore create-if-exists errors
+        pass
+
+    # load rules into memory
+    rules_map = {}
+    cur.execute("SELECT xsd_name, rule_json FROM iso_dq_rules")
+    rows = cur.fetchall()
+    for xsd_name, rule_json in rows:
+        s = lob_to_str(rule_json)
+        try:
+            rules_map[xsd_name] = json.loads(s) if s else {}
+        except Exception:
+            # if rule JSON malformed, keep raw text as fallback
+            rules_map[xsd_name] = {}
+
+    # fetch messages
+    cur.execute("SELECT msg_id, xml_payload, xsd_name FROM iso_messages")
+    processed = 0
+    for msg_id, xml_payload, xsd_name in cur.fetchall():
+        processed += 1
+        try:
+            xml_text = lob_to_str(xml_payload)
+            xml_text_sanitized = sanitize_xml(xml_text)
+
+            # Try repair & parse
+            root, status, repaired_xml = repair_and_parse(xml_text_sanitized)
+
+            # prepare namespace map for XPath (if root exists)
+            ns_map = {}
+            if root is not None:
+                # detect default namespace (None key)
+                ns_uri = root.nsmap.get(None)
+                if ns_uri:
+                    ns_map = {'ns': ns_uri}
+                # optional: normalize tree to that namespace if you want consistent tags
+                # root = normalize_namespaces(root, ns_uri)  # uncomment if needed
+
+            dq_report = []
+            dq_meta = {'xml_repair_status': status}
+
+            # load rules for this message
+            rules_json = rules_map.get(xsd_name, {})
+            rules = rules_json.get("rules") if isinstance(rules_json, dict) else None
+            if not rules:
+                dq_report.append({'error': f'No rules found for XSD {xsd_name}'})
+            else:
+                for rule in rules:
+                    path_raw, required = normalize_rule(rule)
+                    if not path_raw:
+                        continue
+                    # build xpath expression: if ns_map present, use ns: prefix
+                    # If path already starts with "/": keep; else ensure leading slash
+                    path = path_raw
+                    if ns_map and not path.startswith("/ns:"):
+                        # turn /A/B -> /ns:A/ns:B
+                        path = "/" + "/".join([("ns:" + p) for p in path.strip("/").split("/")])
+                    elif not path.startswith("/"):
+                        path = "/" + path
+
+                    # pick which xml to use for searching: repaired_xml if available, otherwise original
+                    search_xml = repaired_xml if repaired_xml is not None else xml_text_sanitized
+                    res = dq_xpath_exists(search_xml, path, ns_map)
+
+                    # construct report entry
+                    entry = {
+                        'path': path_raw,
+                        'required': int(required),
+                        'exists': int(res['exists']),
+                        'parent_exists': int(res.get('parent_exists', 0)),
+                        'in_correct_location': int(res.get('in_correct_location', 0)),
+                        'valid': 'ok' if (res['exists'] and res.get('in_correct_location', 0)) else 'missing' if required == 1 and not res['exists'] else 'ok',
+                        'reason': res.get('reason')
+                    }
+                    dq_report.append(entry)
+
+            # Add meta info
+            out = {
+                'msg_id': msg_id,
+                'xsd_name': xsd_name,
+                'xml_repair_status': status,
+                'dq_report': dq_report
+            }
+            out_json = json.dumps(out, ensure_ascii=False)
+
+            # persist to iso_message_dq_report (upsert style: try update else insert)
+            if not DRY_RUN:
+                cur.execute("UPDATE iso_message_dq_report SET dq_report = :dq, created_at = SYSTIMESTAMP WHERE msg_id = :mid",
+                            dq=out_json, mid=msg_id)
+                if cur.rowcount == 0:
+                    cur.execute("INSERT INTO iso_message_dq_report (msg_id, dq_report) VALUES (:mid, :dq)",
+                                mid=msg_id, dq=out_json)
+
+            # commit periodically
+            if not DRY_RUN and (processed % BATCH_COMMIT == 0):
+                conn.commit()
+
+        except Exception as e:
+            # on any message-level error, capture and store the exception in report table
+            tb = traceback.format_exc()
+            err_json = json.dumps({'msg_id': msg_id, 'error': str(e), 'trace': tb}, ensure_ascii=False)
+            if not DRY_RUN:
+                try:
+                    cur.execute("UPDATE iso_message_dq_report SET dq_report = :dq, created_at = SYSTIMESTAMP WHERE msg_id = :mid",
+                                dq=err_json, mid=msg_id)
+                    if cur.rowcount == 0:
+                        cur.execute("INSERT INTO iso_message_dq_report (msg_id, dq_report) VALUES (:mid, :dq)",
+                                    mid=msg_id, dq=err_json)
+                except Exception:
+                    # best-effort: if even storing fails, print to console
+                    print("Failed to write error for msg_id", msg_id)
+                    print(err_json)
+            print("Error processing msg_id", msg_id, ":", str(e))
+
+    # final commit
+    if not DRY_RUN:
+        conn.commit()
+    cur.close()
+    conn.close()
+    print(f"Processed {processed} messages. Output written to iso_message_dq_report.")
+
+# -------------------------
+# Run
+# -------------------------
+if __name__ == "__main__":
+    process_all_messages()
+    
+#---------------//-------------
+
+
 import re
 from lxml import etree
 
