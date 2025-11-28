@@ -3,29 +3,45 @@ from lxml import etree
 import oracledb
 
 # -------------------------------
-# 1. Connect to Oracle
+# 1. Oracle connection
 # -------------------------------
 DB_USER = "YOUR_USER"
 DB_PASS = "YOUR_PASS"
-DB_DSN  = "YOUR_DSN"  # e.g., "host:port/service"
+DB_DSN  = "YOUR_HOST:1521/YOUR_SERVICE"
 
-conn = oracledb.connect(DB_USER, DB_PASS, DB_DSN)
+conn = oracledb.connect(
+    user=DB_USER,
+    password=DB_PASS,
+    dsn=DB_DSN
+)
 cursor = conn.cursor()
 
 # -------------------------------
-# 2. Load rules JSON from table
+# 2. Load rules JSON from iso_dq_rules
 # -------------------------------
+rules_dict = {}
 cursor.execute("SELECT xsd_name, rule_json FROM iso_dq_rules")
-rules_dict = {row[0]: json.loads(row[1]) for row in cursor.fetchall()}
+for xsd_name, rule_json in cursor.fetchall():
+    # Convert CLOB to string if necessary
+    if hasattr(rule_json, "read"):
+        rules_dict[xsd_name] = json.loads(rule_json.read())
+    else:
+        rules_dict[xsd_name] = json.loads(str(rule_json))
 
 # -------------------------------
 # 3. Load ISO messages
 # -------------------------------
+messages = []
 cursor.execute("SELECT msg_id, xml_payload, xsd_name FROM iso_messages")
-messages = cursor.fetchall()
+for msg_id, xml_payload, xsd_name in cursor.fetchall():
+    if hasattr(xml_payload, "read"):
+        xml_str = xml_payload.read()
+    else:
+        xml_str = str(xml_payload)
+    messages.append((msg_id, xml_str, xsd_name))
 
 # -------------------------------
-# 4. Define helper for XPath check
+# 4. Helper: namespace-aware XPath
 # -------------------------------
 def check_xpath_exists(xml_str, xpath, ns_map):
     """Return True if XPath exists in XML"""
@@ -43,12 +59,12 @@ for msg_id, xml_payload, xsd_name in messages:
     else:
         # Detect default namespace
         root = etree.fromstring(xml_payload.encode("utf-8"))
-        ns_uri = root.nsmap.get(None)  # default namespace
+        ns_uri = root.nsmap.get(None)
         ns_map = {"ns": ns_uri} if ns_uri else {}
 
         dq_report = []
         for rule in rules:
-            # Support both "path" or "xpath" keys
+            # Support flexible keys
             path = rule.get("path") or rule.get("xpath")
             required = rule.get("required") or rule.get("minOccurs") or 0
 
@@ -68,7 +84,7 @@ for msg_id, xml_payload, xsd_name in messages:
             })
 
     # -------------------------------
-    # 6. Write result back to Oracle
+    # 6. Update dq_report column
     # -------------------------------
     cursor.execute(
         "UPDATE iso_messages SET dq_report = :dq WHERE msg_id = :msg_id",
@@ -81,5 +97,4 @@ conn.commit()
 cursor.close()
 conn.close()
 
-print("DQ validation completed and results updated in iso_messages.")
-
+print("DQ validation completed successfully.")
