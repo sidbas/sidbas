@@ -1,5 +1,301 @@
 #!/usr/bin/env python3
 """
+dq_validator_correct_paths.py
+
+Namespace-insensitive ISO XML DQ validator.
+Finds candidate nodes by final element local-name, reconstructs actual ancestor path,
+and compares it to expected XSD path to determine correct vs wrong_location.
+
+Outputs per-message JSON DQ report into table iso_message_dq_report (CLOB).
+
+Requirements:
+  - lxml
+  - cx_Oracle (or change to oracledb if you prefer)
+"""
+
+import json
+import traceback
+import re
+from lxml import etree
+import cx_Oracle
+
+# -------- CONFIG --------
+DB_USER = "YOUR_USER"
+DB_PASS = "YOUR_PASS"
+DB_DSN  = "YOUR_HOST:1521/YOUR_SERVICE"
+
+# Optional: mapping if you want to know expected root per XSD (not strictly required)
+EXPECTED_ROOT_BY_XSD = {
+    "pacs.008.001.08": "FIToFICstmrCdtTrf"
+}
+
+BATCH_COMMIT = 100
+DRY_RUN = False
+# ------------------------
+
+def lob_to_str(maybe_lob):
+    if maybe_lob is None:
+        return ""
+    if hasattr(maybe_lob, "read"):
+        return maybe_lob.read()
+    return str(maybe_lob)
+
+def sanitize_xml(s):
+    return s.lstrip("\ufeff").strip() if s else ""
+
+def repair_and_parse(xml_text):
+    """
+    Parse XML. If SyntaxError, try recover=True.
+    Returns (root_element, status, repaired_text)
+    root_element is the parsed root element (Element) or None.
+    """
+    if not xml_text:
+        return None, "EMPTY", None
+    try:
+        root = etree.fromstring(xml_text.encode("utf-8"))
+        return root, "OK", xml_text
+    except etree.XMLSyntaxError:
+        try:
+            parser = etree.XMLParser(recover=True)
+            root = etree.fromstring(xml_text.encode("utf-8"), parser)
+            repaired = etree.tostring(root, encoding="unicode")
+            return root, "REPAIRED", repaired
+        except Exception as e:
+            return None, f"UNRECOVERABLE: {str(e)}", None
+
+def build_localname_ancestor_list(node):
+    """
+    Return list of local-names from document root down to the node (inclusive).
+    Example: ['Document','group','GrpHdr','MsgId']
+    """
+    if node is None:
+        return []
+    ancestors = []
+    # iterancestors returns ancestors from parent up to root (not including node)
+    for a in node.iterancestors():
+        ancestors.append(etree.QName(a).localname)
+    ancestors.reverse()
+    # now append the node itself
+    ancestors.append(etree.QName(node).localname)
+    return ancestors
+
+def build_found_path_from_node(node):
+    """
+    Build a /local-name path from actual XML (root..node).
+    Example: /Document/group/GrpHdr/MsgId or /group/GrpHdr/MsgId
+    """
+    parts = build_localname_ancestor_list(node)
+    if not parts:
+        return None
+    return "/" + "/".join(parts)
+
+def fallback_raw_exists(xml_text, tag):
+    if not tag:
+        return False
+    patt = fr"<(?:\w+:)?{re.escape(tag)}\b[^>]*>.*?</(?:\w+:)?{re.escape(tag)}>"
+    return bool(re.search(patt, xml_text, flags=re.DOTALL | re.IGNORECASE))
+
+def normalize_rule(rule):
+    path = rule.get("path") or rule.get("xpath") or rule.get("element")
+    # compute required
+    if "required" in rule:
+        try:
+            required = 1 if int(rule.get("required")) != 0 else 0
+        except:
+            required = 1 if bool(rule.get("required")) else 0
+    elif "minOccurs" in rule:
+        try:
+            required = 1 if int(rule.get("minOccurs", 0)) > 0 else 0
+        except:
+            required = 0
+    else:
+        required = 0
+    return path, required
+
+def find_candidates_by_localname(root, localname):
+    """
+    Returns a list of Element nodes in the tree rooted at `root` whose localname == localname.
+    This traverses all descendants and matches localname (namespace-insensitive).
+    """
+    if root is None:
+        return []
+    matches = []
+    # iterate over all elements
+    for el in root.iter():
+        if etree.QName(el).localname == localname:
+            matches.append(el)
+    return matches
+
+def evaluate_rule(root, xml_text, path_raw):
+    """
+    Evaluate a single rule.
+    - root: parsed lxml root (Element) — can be None
+    - xml_text: original or repaired xml string for regex fallback
+    - path_raw: expected path string like /Document/FIToFICstmrCdtTrf/GrpHdr/MsgId
+
+    Returns:
+      {
+        'exists': 0/1,
+        'expected': path_raw,
+        'found': found_path or None,
+        'location_status': 'correct'|'wrong_location'|'unknown',
+        'reason': text
+      }
+    """
+    out = {'exists': 0, 'expected': path_raw, 'found': None, 'location_status': 'unknown', 'reason': None}
+
+    if not path_raw:
+        out['reason'] = "No path specified"
+        return out
+
+    parts = [p.split(":")[-1] for p in path_raw.strip("/").split("/") if p]
+    if not parts:
+        out['reason'] = "Empty path parts"
+        return out
+
+    target = parts[-1]  # final tag to search for
+    # 1) If we have a parsed root, find candidate nodes whose localname == target
+    candidates = find_candidates_by_localname(root, target) if root is not None else []
+
+    # 2) For each candidate, reconstruct ancestor local-name sequence and compare with expected
+    for cand in candidates:
+        ancestor_parts = build_localname_ancestor_list(cand)  # list from root->...->cand
+        # Compare exact equality
+        if ancestor_parts == parts:
+            out['exists'] = 1
+            out['found'] = "/" + "/".join(ancestor_parts)
+            out['location_status'] = "correct"
+            out['reason'] = "Exact path match"
+            return out
+    # 3) If no exact match, but there is at least one candidate, pick the best candidate (first)
+    if candidates:
+        cand = candidates[0]
+        ancestor_parts = build_localname_ancestor_list(cand)
+        out['exists'] = 1
+        out['found'] = "/" + "/".join(ancestor_parts)
+        out['location_status'] = "wrong_location"
+        out['reason'] = "Found element but path differs from expected"
+        return out
+
+    # 4) Fallback: raw regex search on xml_text
+    if fallback_raw_exists(xml_text, target):
+        out['exists'] = 1
+        out['found'] = None
+        out['location_status'] = "unknown"
+        out['reason'] = "Found via raw regex (no parsed node)"
+        return out
+
+    # Not found
+    out['reason'] = "Element not found"
+    return out
+
+def ensure_report_table(cur):
+    cur.execute("""
+    BEGIN
+      EXECUTE IMMEDIATE '
+        CREATE TABLE iso_message_dq_report (
+          msg_id VARCHAR2(64) PRIMARY KEY,
+          dq_report CLOB,
+          created_at TIMESTAMP DEFAULT SYSTIMESTAMP
+        )';
+    EXCEPTION WHEN OTHERS THEN
+      IF SQLCODE != -955 THEN RAISE; END IF;
+    END;
+    """)
+
+def process_all_messages():
+    conn = cx_Oracle.connect(DB_USER, DB_PASS, DB_DSN)
+    cur = conn.cursor()
+
+    ensure_report_table(cur)
+
+    # Load rules into memory
+    cur.execute("SELECT xsd_name, rule_json FROM iso_dq_rules")
+    rules_map = {}
+    for xsd_name, rule_json in cur.fetchall():
+        s = lob_to_str(rule_json)
+        try:
+            rules_map[xsd_name] = json.loads(s) if s else {}
+        except Exception:
+            rules_map[xsd_name] = {}
+
+    # Fetch messages
+    cur.execute("SELECT msg_id, xml_payload, xsd_name FROM iso_messages")
+    processed = 0
+    for msg_id, xml_lob, xsd_name in cur.fetchall():
+        processed += 1
+        try:
+            xml_text = sanitize_xml(lob_to_str(xml_lob))
+            root, status, repaired = repair_and_parse(xml_text)
+            xml_for_regex = repaired if repaired is not None else xml_text
+
+            rules_json = rules_map.get(xsd_name, {})
+            rules = rules_json.get("rules") if isinstance(rules_json, dict) else []
+
+            dq_report = []
+            for rule in rules:
+                path_raw, required = normalize_rule(rule)
+                res = evaluate_rule(root, xml_for_regex, path_raw)
+                valid = 'ok' if res['exists'] == 1 else 'missing' if required == 1 else 'ok'
+                entry = {
+                    'path': path_raw,
+                    'expected': path_raw,
+                    'required': int(required),
+                    'exists': int(res['exists']),
+                    'found': res['found'],
+                    'location_status': res['location_status'],
+                    'valid': valid,
+                    'reason': res['reason']
+                }
+                dq_report.append(entry)
+
+            out = {
+                'msg_id': msg_id,
+                'xsd_name': xsd_name,
+                'xml_status': status,
+                'dq_report': dq_report
+            }
+            out_json = json.dumps(out, ensure_ascii=False)
+
+            if not DRY_RUN:
+                cur.execute("UPDATE iso_message_dq_report SET dq_report = :dq, created_at = SYSTIMESTAMP WHERE msg_id = :mid",
+                            dq=out_json, mid=msg_id)
+                if cur.rowcount == 0:
+                    cur.execute("INSERT INTO iso_message_dq_report (msg_id, dq_report) VALUES (:mid, :dq)",
+                                mid=msg_id, dq=out_json)
+
+            if not DRY_RUN and (processed % BATCH_COMMIT == 0):
+                conn.commit()
+
+        except Exception as e:
+            tb = traceback.format_exc()
+            err_json = json.dumps({'msg_id': msg_id, 'error': str(e), 'trace': tb}, ensure_ascii=False)
+            if not DRY_RUN:
+                try:
+                    cur.execute("UPDATE iso_message_dq_report SET dq_report = :dq, created_at = SYSTIMESTAMP WHERE msg_id = :mid",
+                                dq=err_json, mid=msg_id)
+                    if cur.rowcount == 0:
+                        cur.execute("INSERT INTO iso_message_dq_report (msg_id, dq_report) VALUES (:mid, :dq)",
+                                    mid=msg_id, dq=err_json)
+                except Exception:
+                    print("Failed to write error for msg_id", msg_id)
+                    print(err_json)
+            print("Error processing msg_id", msg_id, ":", str(e))
+
+    if not DRY_RUN:
+        conn.commit()
+    cur.close()
+    conn.close()
+    print(f"Processed {processed} messages.")
+
+if __name__ == "__main__":
+    process_all_messages()
+
+
+
+
+#!/usr/bin/env python3
+"""
 Namespace-insensitive ISO XML DQ validator (final version).
 
 Features:
