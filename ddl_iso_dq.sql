@@ -3,6 +3,15 @@ ALTER TABLE iso_dq_rules ADD severity VARCHAR2(20);
 UPDATE iso_dq_rules
 SET severity =
     CASE
+        WHEN JSON_VALUE(rule_json, '$.path') LIKE '%GrpHdr%' THEN 'CRITICAL'
+        WHEN JSON_VALUE(rule_json, '$.path') LIKE '%CdtTrfTxInf%' THEN 'MAJOR'
+        ELSE 'MINOR'
+    END;
+
+
+UPDATE iso_dq_rules
+SET severity =
+    CASE
         WHEN path LIKE '%GrpHdr%' THEN 'CRITICAL'
         WHEN path LIKE '%CdtTrfTxInf%' THEN 'MAJOR'
         ELSE 'MINOR'
