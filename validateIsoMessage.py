@@ -1,5 +1,284 @@
 #!/usr/bin/env python3
 """
+Namespace-aware, root-tolerant ISO XML DQ validator.
+
+Features:
+- Handles missing / non-standard roots
+- Wraps messages in synthetic <Document> for XPath evaluation
+- Returns 'found' paths reflecting actual XML structure (synthetic wrapper excluded)
+- Local-name based XPath to handle default namespaces
+- Option B + C: wrong-location is valid
+- Stores JSON report in Oracle table iso_message_dq_report
+"""
+
+import json
+import traceback
+import re
+from lxml import etree
+import cx_Oracle  # or oracledb
+
+# --------------------
+# Database config
+# --------------------
+DB_USER = "YOUR_USER"
+DB_PASS = "YOUR_PASS"
+DB_DSN  = "YOUR_HOST:1521/YOUR_SERVICE"
+
+EXPECTED_ROOT_BY_XSD = {
+    "pacs.008.001.08": "FIToFICstmrCdtTrf"
+}
+
+# --------------------
+# Utility functions
+# --------------------
+def lob_to_str(maybe_lob):
+    if hasattr(maybe_lob, "read"):
+        return maybe_lob.read()
+    return maybe_lob
+
+def sanitize_xml(xml_str):
+    if not xml_str:
+        return ""
+    return xml_str.lstrip("\ufeff").strip()
+
+def repair_and_parse(xml_str):
+    """Parse or recover XML"""
+    try:
+        root = etree.fromstring(xml_str.encode("utf-8"))
+        return root, "OK", xml_str
+    except etree.XMLSyntaxError:
+        pass
+    try:
+        parser = etree.XMLParser(recover=True)
+        root = etree.fromstring(xml_str.encode("utf-8"), parser)
+        repaired = etree.tostring(root, encoding="unicode")
+        return root, "REPAIRED", repaired
+    except Exception as e:
+        return None, f"UNRECOVERABLE: {str(e)}", None
+
+def wrap_document_if_missing(root_obj):
+    """
+    Wrap in <Document> if root is not <Document>.
+    Returns (wrapped_root, synthetic_wrapper) where synthetic_wrapper is None if not wrapped.
+    """
+    if root_obj is None:
+        return None, None
+    if etree.QName(root_obj).localname == "Document":
+        return root_obj, None
+    doc = etree.Element("Document")
+    doc.append(root_obj)
+    return doc, doc  # synthetic wrapper
+
+def build_localname_path(node, synthetic_wrapper=None):
+    """
+    Build /local-name path. Excludes synthetic_wrapper from path.
+    """
+    segments = []
+    current = node
+    while current is not None:
+        segments.append(etree.QName(current).localname)
+        current = current.getparent()
+    segments.reverse()
+    # Remove synthetic wrapper
+    if synthetic_wrapper and segments[0] == etree.QName(synthetic_wrapper).localname:
+        segments = segments[1:]
+    return "/" + "/".join(segments)
+
+def build_relaxed_localname_xpath(parts):
+    """
+    Build XPath using local-name() for each part
+    """
+    return "//" + "/".join([f"*[(local-name()='{p}')]" for p in parts])
+
+def fallback_raw_exists(xml_text, tag):
+    if not tag:
+        return False
+    patt = fr"<(?:\w+:)?{tag}\b.*?>.*?</(?:\w+:)?{tag}>"
+    return bool(re.search(patt, xml_text, flags=re.DOTALL | re.IGNORECASE))
+
+def normalize_rule(rule):
+    path = rule.get("path") or rule.get("xpath")
+    required = 1 if rule.get("required") in (True, "1", 1) else 0
+    return path, required
+
+# --------------------
+# XPath evaluation
+# --------------------
+def evaluate_xpath(xml_text, root_obj, strict_xpath, relaxed_xpath):
+    """
+    Evaluate rule: returns dict with exists, location_status, found_path, reason
+    """
+    result = {
+        "exists": 0,
+        "parent_exists": 0,
+        "in_correct_location": 0,
+        "found_path": None,
+        "location_status": "unknown",
+        "reason": None
+    }
+
+    # Strict XPath
+    if root_obj is not None:
+        try:
+            nodes = root_obj.xpath(strict_xpath)
+            if nodes:
+                node = nodes[0]
+                result.update({
+                    "exists": 1,
+                    "parent_exists": 1,
+                    "in_correct_location": 1,
+                    "found_path": build_localname_path(node),
+                    "location_status": "correct",
+                    "reason": "Exact match"
+                })
+                return result
+        except:
+            pass
+
+    # Relaxed local-name XPath
+    if root_obj is not None:
+        try:
+            nodes = root_obj.xpath(relaxed_xpath)
+        except:
+            nodes = []
+        if nodes:
+            node = nodes[0]
+            result.update({
+                "exists": 1,
+                "parent_exists": 1,
+                "in_correct_location": 0,
+                "found_path": build_localname_path(node),
+                "location_status": "wrong_location",
+                "reason": "Found via relaxed local-name search"
+            })
+            return result
+
+    # Raw regex fallback
+    parts = strict_xpath.strip("/").split("/")
+    tag = parts[-1]
+    raw_exists = fallback_raw_exists(xml_text, tag)
+    if raw_exists:
+        result.update({
+            "exists": 1,
+            "found_path": None,
+            "location_status": "unknown",
+            "reason": "Found via raw regex"
+        })
+    return result
+
+# --------------------
+# Main processing
+# --------------------
+def process_messages():
+    conn = cx_Oracle.connect(DB_USER, DB_PASS, DB_DSN)
+    cur = conn.cursor()
+
+    # Ensure DQ report table exists
+    cur.execute("""
+    BEGIN
+        EXECUTE IMMEDIATE '
+        CREATE TABLE iso_message_dq_report (
+            msg_id VARCHAR2(64) PRIMARY KEY,
+            dq_report CLOB,
+            created_at TIMESTAMP DEFAULT SYSTIMESTAMP
+        )';
+    EXCEPTION WHEN OTHERS THEN
+        IF SQLCODE != -955 THEN RAISE; END IF;
+    END;
+    """)
+
+    # Load rules
+    rules_by_xsd = {}
+    cur.execute("SELECT xsd_name, rule_json FROM iso_dq_rules")
+    for xsd_name, rjson in cur.fetchall():
+        rules_by_xsd[xsd_name] = json.loads(lob_to_str(rjson))
+
+    # Process each message
+    cur.execute("SELECT msg_id, xml_payload, xsd_name FROM iso_messages")
+    for msg_id, xml_lob, xsd_name in cur.fetchall():
+        try:
+            xml_text = sanitize_xml(lob_to_str(xml_lob))
+            root, status, repaired = repair_and_parse(xml_text)
+            xml_final = repaired if repaired else xml_text
+
+            wrapped_root, synthetic_wrapper = wrap_document_if_missing(root)
+
+            rules = rules_by_xsd.get(xsd_name, {}).get("rules", [])
+            dq = []
+
+            for rule in rules:
+                path_raw, required = normalize_rule(rule)
+                if not path_raw:
+                    continue
+
+                parts = [p.split(":")[-1] for p in path_raw.strip("/").split("/")]
+                relaxed_xpath = build_relaxed_localname_xpath(parts)
+                strict_xpath = "/" + "/".join(parts)  # namespace-insensitive
+
+                eva = evaluate_xpath(xml_final, wrapped_root, strict_xpath, relaxed_xpath)
+
+                # Build found_path excluding synthetic wrapper
+                if eva["found_path"]:
+                    eva["found_path"] = build_localname_path(
+                        wrapped_root.xpath(relaxed_xpath)[0] if wrapped_root.xpath(relaxed_xpath) else None,
+                        synthetic_wrapper=synthetic_wrapper
+                    )
+
+                valid = "missing" if required == 1 and eva["exists"] == 0 else "ok"
+
+                dq.append({
+                    "path": path_raw,
+                    "expected": path_raw,
+                    "required": required,
+                    "exists": eva["exists"],
+                    "location_status": eva["location_status"],
+                    "found": eva["found_path"],
+                    "valid": valid,
+                    "reason": eva["reason"]
+                })
+
+            out = json.dumps({
+                "msg_id": msg_id,
+                "xsd": xsd_name,
+                "repair": status,
+                "dq_report": dq
+            }, ensure_ascii=False)
+
+            cur.execute("""
+                MERGE INTO iso_message_dq_report d
+                USING (SELECT :m AS msg_id FROM dual) s
+                ON (d.msg_id = s.msg_id)
+                WHEN MATCHED THEN UPDATE SET dq_report = :r, created_at = SYSTIMESTAMP
+                WHEN NOT MATCHED THEN INSERT (msg_id, dq_report) VALUES (:m, :r)
+            """, m=msg_id, r=out)
+
+        except Exception as e:
+            tb = traceback.format_exc()
+            err = json.dumps({"msg_id": msg_id, "error": str(e), "trace": tb})
+            cur.execute("""
+                MERGE INTO iso_message_dq_report d
+                USING (SELECT :m AS msg_id FROM dual) s
+                ON (d.msg_id = s.msg_id)
+                WHEN MATCHED THEN UPDATE SET dq_report = :r
+                WHEN NOT MATCHED THEN INSERT (msg_id, dq_report) VALUES (:m, :r)
+            """, m=msg_id, r=err)
+
+    conn.commit()
+    cur.close()
+    conn.close()
+
+# --------------------
+# Entry point
+# --------------------
+if __name__ == "__main__":
+    process_messages()
+
+
+
+
+
+#!/usr/bin/env python3
+"""
 DQ Validator for ISO XML messages (pacs.008, pacs.009, etc.)
 Namespace-aware, root-tolerant, and produces JSON DQ reports.
 
