@@ -1,3 +1,21 @@
+UPDATE iso_dq_rules r
+SET severity =
+    (SELECT CASE
+                WHEN jt.path LIKE '%GrpHdr%' THEN 'CRITICAL'
+                WHEN jt.path LIKE '%CdtTrfTxInf%' THEN 'MAJOR'
+                ELSE 'MINOR'
+            END
+     FROM JSON_TABLE(
+            r.rule_json,
+            '$.rules[*]'
+            COLUMNS (
+                path VARCHAR2(500) PATH '$.path'
+            )
+     ) jt
+     WHERE ROWNUM = 1);   -- if multiple rules per row
+
+
+
 ALTER TABLE iso_dq_rules ADD severity VARCHAR2(20);
 
 UPDATE iso_dq_rules
