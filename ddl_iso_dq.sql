@@ -1,3 +1,106 @@
+ALTER TABLE iso_dq_rules ADD severity VARCHAR2(20);
+
+UPDATE iso_dq_rules
+SET severity =
+    CASE
+        WHEN path LIKE '%GrpHdr%' THEN 'CRITICAL'
+        WHEN path LIKE '%CdtTrfTxInf%' THEN 'MAJOR'
+        ELSE 'MINOR'
+    END;
+
+CREATE OR REPLACE FUNCTION build_dq_summary_oracle(p_msg_id VARCHAR2)
+RETURN CLOB
+IS
+    l_summary CLOB;
+BEGIN
+    WITH rules AS (
+        SELECT r.path,
+               r.severity
+        FROM iso_dq_rules r
+    ),
+    details AS (
+        SELECT jt.path,
+               jt.exists,
+               jt.location_status,
+               jt.found
+        FROM iso_dq_results d,
+             JSON_TABLE(
+                 d.dq_details,
+                 '$[*]'
+                 COLUMNS (
+                    path            VARCHAR2(500)  PATH '$.path',
+                    exists          NUMBER         PATH '$.exists',
+                    location_status VARCHAR2(50)   PATH '$.location_status',
+                    found           VARCHAR2(1000) PATH '$.found'
+                 )
+             ) jt
+        WHERE d.msg_id = p_msg_id
+    ),
+    combined AS (
+        SELECT r.severity,
+               r.path,
+               NVL(d.exists, 0) AS exists,
+               NVL(d.location_status, 'missing') AS location_status
+        FROM rules r
+        LEFT JOIN details d
+               ON r.path = d.path
+    ),
+    stats AS (
+        SELECT 
+            COUNT(*) AS total_rules,
+            SUM(CASE WHEN exists = 1 AND location_status = 'correct' THEN 1 ELSE 0 END) AS rules_passed,
+            SUM(CASE WHEN exists = 0 THEN 1 ELSE 0 END) AS missing_tags,
+            SUM(CASE WHEN location_status = 'wrong_location' THEN 1 ELSE 0 END) AS wrong_location,
+            SUM(CASE WHEN exists = 1 AND location_status = 'correct' THEN 1 ELSE 0 END) AS correct_location
+        FROM combined
+    ),
+    severity_summary AS (
+        SELECT JSON_ARRAYAGG(
+                   JSON_OBJECT(
+                       'severity' VALUE severity,
+                       'total' VALUE COUNT(*),
+                       'missing' VALUE SUM(CASE WHEN exists = 0 THEN 1 ELSE 0 END),
+                       'wrong_location' VALUE SUM(CASE WHEN location_status = 'wrong_location' THEN 1 ELSE 0 END)
+                   )
+               ) AS severity_json
+        FROM combined
+        GROUP BY 1
+    )
+    SELECT JSON_OBJECT(
+               'message_id' VALUE p_msg_id,
+               'summary' VALUE (
+                   SELECT JSON_OBJECT(
+                       'total_rules' VALUE total_rules,
+                       'rules_passed' VALUE rules_passed,
+                       'missing_tags' VALUE missing_tags,
+                       'wrong_location' VALUE wrong_location,
+                       'correct_location' VALUE correct_location
+                   )
+                   FROM stats
+               ),
+               'by_severity' VALUE (
+                   SELECT severity_json FROM severity_summary FETCH FIRST 1 ROWS ONLY
+               ),
+               'overall_status' VALUE (
+                   SELECT CASE
+                              WHEN missing_tags > 0 THEN 'fail'
+                              WHEN wrong_location > 0 THEN 'warning'
+                              ELSE 'pass'
+                          END
+                   FROM stats
+               )
+           )
+    INTO l_summary
+    FROM dual;
+
+    RETURN l_summary;
+
+END;
+/
+
+
+
+
 CREATE OR REPLACE FUNCTION validate_iso_message (
     p_xml_msg  IN CLOB,
     p_xsd_name IN VARCHAR2
