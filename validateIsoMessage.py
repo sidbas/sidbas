@@ -1,5 +1,383 @@
 #!/usr/bin/env python3
 """
+dq_validator_options1_2.py
+
+Final DQ validator:
+ - Supports standard and non-standard roots (multi-root payloads)
+ - Namespace-insensitive (matches by local-name)
+ - Wraps multi-root payloads internally (RootWrapper) then removes it from output
+ - Returns both full-path and tail-match results (Options 2 and 1)
+ - Writes JSON per-message DQ report into iso_message_dq_report (CLOB)
+
+Requirements:
+ - lxml
+ - cx_Oracle (or adjust to oracledb)
+"""
+
+import json
+import traceback
+import re
+from lxml import etree
+import cx_Oracle
+
+# -------- CONFIGURE --------
+DB_USER = "YOUR_USER"
+DB_PASS = "YOUR_PASS"
+DB_DSN  = "YOUR_HOST:1521/YOUR_SERVICE"
+BATCH_COMMIT = 100
+DRY_RUN = False
+# --------------------------
+
+def lob_to_str(x):
+    if x is None:
+        return ""
+    if hasattr(x, "read"):
+        return x.read()
+    return str(x)
+
+def sanitize_xml(s):
+    return s.lstrip("\ufeff").strip() if s else ""
+
+# parse or wrap multi-root text into a single Element
+def parse_with_wrapper(xml_text):
+    """
+    Returns (root_element, status, repaired_text)
+    root_element: an Element that is the parsing root (may be a wrapped RootWrapper)
+    status: 'OK', 'REPAIRED', 'WRAPPED_MULTIROOT', 'UNRECOVERABLE', ...
+    repaired_text: string representation (useful for regex fallback)
+    """
+    if not xml_text:
+        return None, "EMPTY", None
+
+    xml_text = xml_text.strip()
+    # quick attempt to parse directly
+    try:
+        root = etree.fromstring(xml_text.encode("utf-8"))
+        return root, "OK", xml_text
+    except etree.XMLSyntaxError:
+        pass
+
+    # detect multiple top-level tags by counting probable top tags (simple heuristic)
+    # We look for patterns like <header ...> or <group ...> at start of lines
+    top_tags = re.findall(r'<([A-Za-z0-9_]+)(?:\s|>)', xml_text)
+    # If we have more than one top-level tag before a single root completes, wrap
+    # Heuristic: if more than one top tag and there is not a single enclosing root, wrap.
+    # We'll conservatively wrap whenever we see >1 top tag and no enclosing single root.
+    if len(top_tags) > 1:
+        wrapped = "<RootWrapper>" + xml_text + "</RootWrapper>"
+        try:
+            parser = etree.XMLParser(recover=True)
+            root = etree.fromstring(wrapped.encode("utf-8"), parser)
+            repaired = etree.tostring(root, encoding="unicode")
+            return root, "WRAPPED_MULTIROOT", repaired
+        except Exception:
+            # fall back to recover parse of original
+            try:
+                parser = etree.XMLParser(recover=True)
+                root = etree.fromstring(xml_text.encode("utf-8"), parser)
+                repaired = etree.tostring(root, encoding="unicode")
+                return root, "REPAIRED", repaired
+            except Exception as e:
+                return None, f"UNRECOVERABLE: {str(e)}", None
+
+    # else try recover parse
+    try:
+        parser = etree.XMLParser(recover=True)
+        root = etree.fromstring(xml_text.encode("utf-8"), parser)
+        repaired = etree.tostring(root, encoding="unicode")
+        return root, "REPAIRED", repaired
+    except Exception as e:
+        return None, f"UNRECOVERABLE: {str(e)}", None
+
+def build_ancestor_localnames(node):
+    """
+    Return list of local-names from the top of parsed tree down to node inclusive.
+    If the top is RootWrapper, it will be included here; removal happens later.
+    """
+    if node is None:
+        return []
+    parts = []
+    for a in node.iterancestors():
+        parts.append(etree.QName(a).localname)
+    parts.reverse()
+    parts.append(etree.QName(node).localname)
+    return parts
+
+def build_found_path(node, synthetic_wrapper_name="RootWrapper"):
+    """
+    Build /local-name path from top down to node.
+    If the topmost element equals synthetic_wrapper_name, remove it from returned path.
+    """
+    parts = build_ancestor_localnames(node)
+    if not parts:
+        return None
+    # remove synthetic wrapper if present as first element
+    if parts[0] == synthetic_wrapper_name:
+        parts = parts[1:]
+    return "/" + "/".join(parts) if parts else None
+
+def fallback_raw_exists(xml_text, tag):
+    if not tag:
+        return False
+    patt = fr"<(?:\w+:)?{re.escape(tag)}\b[^>]*>.*?</(?:\w+:)?{re.escape(tag)}>"
+    return bool(re.search(patt, xml_text, flags=re.DOTALL | re.IGNORECASE))
+
+def normalize_rule(rule):
+    path = rule.get("path") or rule.get("xpath") or rule.get("element")
+    # required detection
+    if "required" in rule:
+        try:
+            required = 1 if int(rule.get("required")) != 0 else 0
+        except:
+            required = 1 if bool(rule.get("required")) else 0
+    elif "minOccurs" in rule:
+        try:
+            required = 1 if int(rule.get("minOccurs", 0)) > 0 else 0
+        except:
+            required = 0
+    else:
+        required = 0
+    return path, required
+
+def find_candidates(root, localname):
+    """Return list of elements whose local-name equals localname (namespace-insensitive)."""
+    if root is None:
+        return []
+    matches = []
+    for el in root.iter():
+        if etree.QName(el).localname == localname:
+            matches.append(el)
+    return matches
+
+def is_tail_match(expected_parts, found_parts, tail_length=None):
+    """
+    Returns True if trailing segments match.
+    If tail_length is provided, compare last tail_length segments.
+    If tail_length is None, compares minimal trailing segments: at least last 2 segments if available,
+    otherwise compares last 1.
+    """
+    if not expected_parts or not found_parts:
+        return False
+    if tail_length is None:
+        # default: compare at least last 2 segments if expected has >=2, else last 1
+        tail_length = 2 if len(expected_parts) >= 2 else 1
+    if tail_length > len(expected_parts):
+        tail_length = len(expected_parts)
+    if tail_length > len(found_parts):
+        return False
+    return expected_parts[-tail_length:] == found_parts[-tail_length:]
+
+def evaluate_rule(root, xml_text, path_raw, synthetic_wrapper_name="RootWrapper"):
+    """
+    Evaluate a single rule and return a dictionary with:
+      'exists' (0/1),
+      'expected' (path_raw),
+      'found' (string or None),
+      'full_match' (bool),
+      'tail_match' (bool),
+      'location_status' (one of: 'correct','tail_match','wrong_location','unknown'),
+      'reason' (text)
+    """
+    out = {
+        'exists': 0,
+        'expected': path_raw,
+        'found': None,
+        'full_match': False,
+        'tail_match': False,
+        'location_status': 'unknown',
+        'reason': None
+    }
+    if not path_raw:
+        out['reason'] = "no path"
+        return out
+
+    expected_parts = [p.split(":")[-1] for p in path_raw.strip("/").split("/") if p]
+    if not expected_parts:
+        out['reason'] = "empty expected_parts"
+        return out
+
+    target = expected_parts[-1]
+
+    # 1) find candidate nodes
+    candidates = find_candidates(root, target) if root is not None else []
+
+    # 2) evaluate candidates: prefer full match, then tail match, then first candidate
+    best = None
+    for cand in candidates:
+        found_parts = build_ancestor_localnames(cand)
+        # remove synthetic wrapper if present
+        if found_parts and found_parts[0] == synthetic_wrapper_name:
+            cmp_found_parts = found_parts[1:]
+        else:
+            cmp_found_parts = found_parts[:]
+
+        # full match?
+        if cmp_found_parts == expected_parts:
+            out['exists'] = 1
+            out['found'] = "/" + "/".join(cmp_found_parts) if cmp_found_parts else None
+            out['full_match'] = True
+            out['tail_match'] = True  # full implies tail
+            out['location_status'] = 'correct'
+            out['reason'] = 'exact full path match'
+            return out
+
+    # second pass: tail match check (pick first candidate that matches tail)
+    for cand in candidates:
+        found_parts = build_ancestor_localnames(cand)
+        if found_parts and found_parts[0] == synthetic_wrapper_name:
+            cmp_found_parts = found_parts[1:]
+        else:
+            cmp_found_parts = found_parts[:]
+        # default tail_length = 2 if expected has 2+, else 1
+        tail_ok = is_tail_match(expected_parts, cmp_found_parts, tail_length=2 if len(expected_parts) >= 2 else 1)
+        if tail_ok:
+            out['exists'] = 1
+            out['found'] = "/" + "/".join(cmp_found_parts) if cmp_found_parts else None
+            out['full_match'] = False
+            out['tail_match'] = True
+            out['location_status'] = 'tail_match'
+            out['reason'] = 'tail segments match'
+            return out
+
+    # third: candidate exists but no tail/full match — return first candidate as wrong_location
+    if candidates:
+        cand = candidates[0]
+        found_parts = build_ancestor_localnames(cand)
+        if found_parts and found_parts[0] == synthetic_wrapper_name:
+            cmp_found_parts = found_parts[1:]
+        else:
+            cmp_found_parts = found_parts[:]
+        out['exists'] = 1
+        out['found'] = "/" + "/".join(cmp_found_parts) if cmp_found_parts else None
+        out['full_match'] = False
+        out['tail_match'] = False
+        out['location_status'] = 'wrong_location'
+        out['reason'] = 'element found but path differs'
+        return out
+
+    # fallback: regex search
+    if fallback_raw_exists(xml_text, target):
+        out['exists'] = 1
+        out['found'] = None
+        out['full_match'] = False
+        out['tail_match'] = False
+        out['location_status'] = 'unknown'
+        out['reason'] = 'found by raw regex (no parsed match)'
+        return out
+
+    out['reason'] = 'not found'
+    return out
+
+# DB helper to ensure report table
+def ensure_report_table(cur):
+    cur.execute("""
+    BEGIN
+      EXECUTE IMMEDIATE '
+        CREATE TABLE iso_message_dq_report (
+          msg_id VARCHAR2(64) PRIMARY KEY,
+          dq_report CLOB,
+          created_at TIMESTAMP DEFAULT SYSTIMESTAMP
+        )';
+    EXCEPTION WHEN OTHERS THEN
+      IF SQLCODE != -955 THEN RAISE; END IF;
+    END;
+    """)
+
+def process_all():
+    conn = cx_Oracle.connect(DB_USER, DB_PASS, DB_DSN)
+    cur = conn.cursor()
+    ensure_report_table(cur)
+
+    # load rules
+    cur.execute("SELECT xsd_name, rule_json FROM iso_dq_rules")
+    rules_map = {}
+    for xsd_name, rule_json in cur.fetchall():
+        try:
+            rules_map[xsd_name] = json.loads(lob_to_str(rule_json)) if rule_json else {}
+        except Exception:
+            rules_map[xsd_name] = {}
+
+    # fetch messages
+    cur.execute("SELECT msg_id, xml_payload, xsd_name FROM iso_messages")
+    processed = 0
+    for msg_id, xml_lob, xsd_name in cur.fetchall():
+        processed += 1
+        try:
+            xml_text = sanitize_xml(lob_to_str(xml_lob))
+            # parse with wrapper if needed
+            root, status, repaired = parse_with_wrapper(xml_text)
+            xml_for_regex = repaired if repaired is not None else xml_text
+
+            rules_json = rules_map.get(xsd_name, {}) or {}
+            rules = rules_json.get("rules") or []
+
+            dq_report = []
+            for rule in rules:
+                path_raw, required = normalize_rule(rule)
+                res = evaluate_rule(root, xml_for_regex, path_raw, synthetic_wrapper_name="RootWrapper")
+                valid = 'ok' if res['exists'] == 1 else 'missing' if required == 1 else 'ok'
+                entry = {
+                    'path': path_raw,
+                    'expected': path_raw,
+                    'required': int(required),
+                    'exists': int(res['exists']),
+                    'found': res['found'],
+                    'full_match': bool(res['full_match']),
+                    'tail_match': bool(res['tail_match']),
+                    'location_status': res['location_status'],
+                    'valid': valid,
+                    'reason': res['reason']
+                }
+                dq_report.append(entry)
+
+            out = {
+                'msg_id': msg_id,
+                'xsd_name': xsd_name,
+                'xml_status': status,
+                'dq_report': dq_report
+            }
+            out_json = json.dumps(out, ensure_ascii=False)
+
+            if not DRY_RUN:
+                cur.execute("UPDATE iso_message_dq_report SET dq_report = :dq, created_at = SYSTIMESTAMP WHERE msg_id = :mid",
+                            dq=out_json, mid=msg_id)
+                if cur.rowcount == 0:
+                    cur.execute("INSERT INTO iso_message_dq_report (msg_id, dq_report) VALUES (:mid, :dq)",
+                                mid=msg_id, dq=out_json)
+
+            if not DRY_RUN and (processed % BATCH_COMMIT == 0):
+                conn.commit()
+
+        except Exception as e:
+            tb = traceback.format_exc()
+            err = json.dumps({'msg_id': msg_id, 'error': str(e), 'trace': tb}, ensure_ascii=False)
+            if not DRY_RUN:
+                try:
+                    cur.execute("UPDATE iso_message_dq_report SET dq_report = :dq, created_at = SYSTIMESTAMP WHERE msg_id = :mid",
+                                dq=err, mid=msg_id)
+                    if cur.rowcount == 0:
+                        cur.execute("INSERT INTO iso_message_dq_report (msg_id, dq_report) VALUES (:mid, :dq)",
+                                    mid=msg_id, dq=err)
+                except Exception:
+                    print("Failed to write error for msg_id", msg_id)
+                    print(err)
+            print("Error processing msg_id", msg_id, ":", str(e))
+
+    if not DRY_RUN:
+        conn.commit()
+    cur.close()
+    conn.close()
+    print(f"Processed {processed} messages")
+
+if __name__ == "__main__":
+    process_all()
+    
+    
+
+
+
+#!/usr/bin/env python3
+"""
 dq_validator_correct_paths.py
 
 Namespace-insensitive ISO XML DQ validator.
