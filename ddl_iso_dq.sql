@@ -1,3 +1,110 @@
+CREATE OR REPLACE FUNCTION build_dq_summary_oracle_23ai(p_msg_id VARCHAR2)
+RETURN CLOB
+IS
+    l_summary CLOB;
+BEGIN
+    WITH rules AS (
+        -- Extract paths from rule_json array safely
+        SELECT r.rowid AS rid,
+               jt.path,
+               r.severity
+        FROM iso_dq_rules r,
+             JSON_TABLE(
+                 r.rule_json,
+                 '$.rules[*]'
+                 COLUMNS (
+                     path VARCHAR2(500) PATH '$.path'
+                 )
+             ) jt
+        WHERE r.rule_json IS NOT NULL AND r.rule_json IS JSON
+    ),
+    details AS (
+        -- Extract evaluated rules from dq_details
+        SELECT jt.path,
+               jt.exists_flg,
+               jt.location_status,
+               jt.found
+        FROM iso_dq_results d,
+             JSON_TABLE(
+                 d.dq_details,
+                 '$[*]'
+                 COLUMNS (
+                     path VARCHAR2(500) PATH '$.path',
+                     exists_flg NUMBER PATH '$.exists',       -- renamed from reserved word
+                     location_status VARCHAR2(50) PATH '$.location_status',
+                     found VARCHAR2(1000) PATH '$.found'
+                 )
+             ) jt
+        WHERE d.msg_id = p_msg_id
+    ),
+    combined AS (
+        -- Combine rules and evaluated details
+        SELECT r.severity,
+               r.path,
+               NVL(d.exists_flg, 0) AS is_present,
+               NVL(d.location_status, 'missing') AS location_status
+        FROM rules r
+        LEFT JOIN details d
+        ON r.path = d.path
+    ),
+    stats AS (
+        -- Overall counts
+        SELECT 
+            COUNT(*) AS total_rules,
+            SUM(CASE WHEN is_present = 1 AND location_status = 'correct' THEN 1 ELSE 0 END) AS rules_passed,
+            SUM(CASE WHEN is_present = 0 THEN 1 ELSE 0 END) AS missing_tags,
+            SUM(CASE WHEN location_status = 'wrong_location' THEN 1 ELSE 0 END) AS wrong_location,
+            SUM(CASE WHEN is_present = 1 AND location_status = 'correct' THEN 1 ELSE 0 END) AS correct_location
+        FROM combined
+    ),
+    severity_summary AS (
+        -- Counts per severity
+        SELECT JSON_ARRAYAGG(
+                   JSON_OBJECT(
+                       'severity' VALUE severity,
+                       'total' VALUE COUNT(*),
+                       'missing' VALUE SUM(CASE WHEN is_present = 0 THEN 1 ELSE 0 END),
+                       'wrong_location' VALUE SUM(CASE WHEN location_status = 'wrong_location' THEN 1 ELSE 0 END)
+                   )
+               ) AS severity_json
+        FROM combined
+        GROUP BY severity
+    )
+    SELECT JSON_OBJECT(
+               'message_id' VALUE p_msg_id,
+               'summary' VALUE (
+                   SELECT JSON_OBJECT(
+                       'total_rules' VALUE total_rules,
+                       'rules_passed' VALUE rules_passed,
+                       'missing_tags' VALUE missing_tags,
+                       'wrong_location' VALUE wrong_location,
+                       'correct_location' VALUE correct_location
+                   )
+                   FROM stats
+               ),
+               'by_severity' VALUE (
+                   SELECT severity_json
+                   FROM severity_summary
+                   FETCH FIRST 1 ROWS ONLY
+               ),
+               'overall_status' VALUE (
+                   SELECT CASE
+                              WHEN missing_tags > 0 THEN 'fail'
+                              WHEN wrong_location > 0 THEN 'warning'
+                              ELSE 'pass'
+                          END
+                   FROM stats
+               )
+           )
+    INTO l_summary
+    FROM dual;
+
+    RETURN l_summary;
+END;
+/
+
+
+
 CREATE OR REPLACE FUNCTION build_dq_summary_oracle(p_msg_id VARCHAR2)
 RETURN CLOB
 IS
