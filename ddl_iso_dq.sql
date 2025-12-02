@@ -1,3 +1,159 @@
+CREATE OR REPLACE FUNCTION build_dq_summary_oracle_23ai_v3 (p_msg_id VARCHAR2)
+RETURN CLOB
+IS
+    l_summary CLOB;
+BEGIN
+    WITH
+    -------------------------------------------------------------------
+    -- RULES HANDLING (two shapes supported)
+    -------------------------------------------------------------------
+    rules AS (
+        -- Case 1: rule_json contains { "rules": [ ... ] }
+        SELECT r.rowid AS rid, jt.path, r.severity
+        FROM iso_dq_rules r
+        CROSS APPLY (
+            SELECT * FROM JSON_TABLE(
+                r.rule_json,
+                '$.rules[*]'
+                COLUMNS ( path VARCHAR2(500) PATH '$.path' )
+            )
+        ) jt
+        WHERE JSON_EXISTS(r.rule_json,'$.rules')
+
+        UNION ALL
+
+        -- Case 2: rule_json is a top-level array [ {...}, ... ]
+        SELECT r.rowid AS rid, jt2.path, r.severity
+        FROM iso_dq_rules r
+        CROSS APPLY (
+            SELECT * FROM JSON_TABLE(
+                r.rule_json,
+                '$[*]'
+                COLUMNS ( path VARCHAR2(500) PATH '$.path' )
+            )
+        ) jt2
+        WHERE NOT JSON_EXISTS(r.rule_json,'$.rules')
+          AND JSON_EXISTS(r.rule_json,'$[0]')
+    ),
+
+    -------------------------------------------------------------------
+    -- DETAILS HANDLING (two shapes supported)
+    -------------------------------------------------------------------
+    details AS (
+        -- Case 1: dq_report contains {"dq_report":[ ... ]}
+        SELECT jt.path, jt.exists_flg, jt.location_status, jt.found
+        FROM iso_message_dq_report d
+        CROSS APPLY (
+            SELECT * FROM JSON_TABLE(
+                d.dq_report,
+                '$.dq_report[*]'
+                COLUMNS (
+                    path VARCHAR2(500) PATH '$.path',
+                    exists_flg NUMBER PATH '$.exists',
+                    location_status VARCHAR2(50) PATH '$.location_status',
+                    found VARCHAR2(1000) PATH '$.found'
+                )
+            )
+        ) jt
+        WHERE d.msg_id = p_msg_id
+          AND JSON_EXISTS(d.dq_report,'$.dq_report')
+
+        UNION ALL
+
+        -- Case 2: dq_report is top-level array [ ... ]
+        SELECT jt2.path, jt2.exists_flg, jt2.location_status, jt2.found
+        FROM iso_message_dq_report d
+        CROSS APPLY (
+            SELECT * FROM JSON_TABLE(
+                d.dq_report,
+                '$[*]'
+                COLUMNS (
+                    path VARCHAR2(500) PATH '$.path',
+                    exists_flg NUMBER PATH '$.exists',
+                    location_status VARCHAR2(50) PATH '$.location_status',
+                    found VARCHAR2(1000) PATH '$.found'
+                )
+            )
+        ) jt2
+        WHERE d.msg_id = p_msg_id
+          AND NOT JSON_EXISTS(d.dq_report,'$.dq_report')
+          AND JSON_EXISTS(d.dq_report,'$[0]')
+    ),
+
+    -------------------------------------------------------------------
+    -- COMBINE RULES + DETAILS
+    -------------------------------------------------------------------
+    combined AS (
+        SELECT r.severity, r.path,
+               NVL(d.exists_flg, 0) AS is_present,
+               NVL(d.location_status, 'missing') AS location_status
+        FROM rules r
+        LEFT JOIN details d ON (r.path = d.path)
+    ),
+
+    stats AS (
+        SELECT 
+            COUNT(*) AS total_rules,
+            SUM(CASE WHEN is_present = 1 AND location_status = 'correct' THEN 1 END) AS rules_passed,
+            SUM(CASE WHEN is_present = 0 THEN 1 END) AS missing_tags,
+            SUM(CASE WHEN location_status = 'wrong_location' THEN 1 END) AS wrong_location,
+            SUM(CASE WHEN is_present = 1 AND location_status = 'correct' THEN 1 END) AS correct_location
+        FROM combined
+    ),
+
+    severity_summary AS (
+        SELECT JSON_ARRAYAGG(
+            JSON_OBJECT(
+                'severity' VALUE severity,
+                'total' VALUE COUNT(*),
+                'missing' VALUE SUM(CASE WHEN is_present = 0 THEN 1 END),
+                'wrong_location' VALUE SUM(CASE WHEN location_status='wrong_location' THEN 1 END)
+            )
+        ) AS severity_json
+        FROM combined
+        GROUP BY severity
+    )
+
+    SELECT JSON_OBJECT(
+               'message_id' VALUE p_msg_id,
+               'summary' VALUE (
+                   SELECT JSON_OBJECT(
+                       'total_rules' VALUE total_rules,
+                       'rules_passed' VALUE rules_passed,
+                       'missing_tags' VALUE missing_tags,
+                       'wrong_location' VALUE wrong_location,
+                       'correct_location' VALUE correct_location
+                   ) FROM stats
+               ),
+               'by_severity' VALUE (
+                   SELECT COALESCE(
+                       (SELECT severity_json FROM severity_summary FETCH FIRST 1 ROWS ONLY),
+                       JSON_ARRAY()
+                   ) FROM dual
+               ),
+               'overall_status' VALUE (
+                   SELECT CASE
+                              WHEN missing_tags > 0 THEN 'fail'
+                              WHEN wrong_location > 0 THEN 'warning'
+                              ELSE 'pass'
+                          END
+                   FROM stats
+               )
+           )
+    INTO l_summary
+    FROM dual;
+
+    RETURN l_summary;
+
+EXCEPTION
+    WHEN OTHERS THEN
+        RAISE_APPLICATION_ERROR(-20001,
+            'build_dq_summary_oracle_23ai_v3 failed: ' || SQLERRM);
+END;
+/
+
+
+
 CREATE OR REPLACE FUNCTION build_dq_summary_oracle_23ai_v2(p_msg_id VARCHAR2)
 RETURN CLOB
 IS
