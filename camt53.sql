@@ -1,4 +1,76 @@
 SELECT
+  t.id AS src_id,
+
+  gh.MsgId,
+  stmt.StmtId,
+  acct.IBAN,
+  acct.Ccy AS AcctCcy,
+
+  ntry.Amt,
+  ntry.Ccy AS AmtCcy,
+  ntry.DbCrInd,
+  ntry.BookDt,
+  ntry.ValDt,
+
+  XMLTOJSON(ntry.NtryXml) AS ntry_json
+FROM your_table t
+
+-- ===== Group Header =====
+LEFT JOIN XMLTABLE(
+  XMLNAMESPACES(
+    'urn:iso:std:iso:20022:tech:xsd:camt.053.001.xx' AS "ns"
+  ),
+  '/root/ns:group/ns:GrpHdr'
+  PASSING t.xml_doc
+  COLUMNS
+    MsgId VARCHAR2(35) PATH 'ns:MsgId'
+) gh ON 1=1
+
+-- ===== Statement =====
+LEFT JOIN XMLTABLE(
+  XMLNAMESPACES(
+    'urn:iso:std:iso:20022:tech:xsd:camt.053.001.xx' AS "ns"
+  ),
+  '/root/ns:transaction/ns:Stmt'
+  PASSING t.xml_doc
+  COLUMNS
+    StmtId VARCHAR2(35) PATH 'ns:Id'
+) stmt ON 1=1
+
+-- ===== Account =====
+LEFT JOIN XMLTABLE(
+  XMLNAMESPACES(
+    'urn:iso:std:iso:20022:tech:xsd:camt.053.001.xx' AS "ns"
+  ),
+  '/root/ns:transaction/ns:Stmt/ns:Acct'
+  PASSING t.xml_doc
+  COLUMNS
+    IBAN VARCHAR2(34) PATH 'ns:Id/ns:IBAN',
+    Ccy  VARCHAR2(3)  PATH 'ns:Ccy'
+) acct ON 1=1
+
+-- ===== Entries =====
+LEFT JOIN XMLTABLE(
+  XMLNAMESPACES(
+    'urn:iso:std:iso:20022:tech:xsd:camt.053.001.xx' AS "ns"
+  ),
+  '/root/ns:transaction/ns:Stmt/ns:Ntry'
+  PASSING t.xml_doc
+  COLUMNS
+    Amt     NUMBER       PATH 'ns:Amt',
+    Ccy     VARCHAR2(3)  PATH 'ns:Amt/@Ccy',
+    DbCrInd VARCHAR2(4)  PATH 'ns:CdtDbtInd',
+    BookDt  VARCHAR2(10) PATH 'ns:BookgDt/ns:Dt',
+    ValDt   VARCHAR2(10) PATH 'ns:ValDt/ns:Dt',
+    NtryXml XMLTYPE      PATH '.'
+) ntry ON 1=1;
+
+----------------------------
+
+
+
+
+SELECT
     JSON_OBJECT(
       '_id' VALUE t.id,
       'timestamp' VALUE TO_CHAR(t.ts_col, 'YYYY-MM-DD"T"HH24:MI:SS'),
