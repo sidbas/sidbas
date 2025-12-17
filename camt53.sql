@@ -1,4 +1,55 @@
 SELECT
+    JSON_OBJECT(
+      '_id' VALUE t.id,
+      'timestamp' VALUE TO_CHAR(t.ts_col, 'YYYY-MM-DD"T"HH24:MI:SS'),
+      'MsgId' VALUE gh.MsgId,
+      'CreDtTm' VALUE gh.CreDtTm,
+      'AcctId' VALUE acct.IBAN,
+      'AcctCcy' VALUE acct.Ccy,
+      'data' VALUE XMLTOJSON(stmt.StmtXml)
+      RETURNING CLOB
+    ) AS json_doc
+FROM your_table t
+
+-- ===== Group Header =====
+LEFT JOIN XMLTABLE(
+  XMLNAMESPACES(
+    'urn:iso:std:iso:20022:tech:xsd:camt.053.001.02' AS "ns"
+  ),
+  '/root/ns:GrpHdr'
+  PASSING t.xml_doc
+  COLUMNS
+    MsgId    VARCHAR2(35) PATH 'ns:MsgId',
+    CreDtTm  VARCHAR2(35) PATH 'ns:CreDtTm'
+) gh ON 1 = 1
+
+-- ===== Account =====
+LEFT JOIN XMLTABLE(
+  XMLNAMESPACES(
+    'urn:iso:std:iso:20022:tech:xsd:camt.053.001.02' AS "ns"
+  ),
+  '/root/ns:Stmt/ns:Acct'
+  PASSING t.xml_doc
+  COLUMNS
+    IBAN VARCHAR2(34) PATH 'ns:Id/ns:IBAN',
+    Ccy  VARCHAR2(3)  PATH 'ns:Ccy'
+) acct ON 1 = 1
+
+-- ===== Full Statement (for Python flattening) =====
+LEFT JOIN XMLTABLE(
+  XMLNAMESPACES(
+    'urn:iso:std:iso:20022:tech:xsd:camt.053.001.02' AS "ns"
+  ),
+  '/root/ns:Stmt'
+  PASSING t.xml_doc
+  COLUMNS
+    StmtXml XMLTYPE PATH '.'
+) stmt ON 1 = 1;
+
+
+
+
+SELECT
   XMLQUERY(
     'declare namespace ns="urn:iso:std:iso:20022:tech:xsd:camt.053.001.02";
      /root/ns:GrpHdr'
