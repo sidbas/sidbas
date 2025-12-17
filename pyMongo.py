@@ -1,6 +1,84 @@
 import json
 import oracledb
 from pymongo import MongoClient, ReplaceOne
+from datetime import datetime
+
+# ---------- Connections ----------
+ora = oracledb.connect(
+    user="ORA_USER",
+    password="ORA_PWD",
+    dsn="HOST:PORT/SERVICE"
+)
+cur = ora.cursor()
+
+mongo = MongoClient("mongodb://localhost:27017")
+col = mongo["mongo12345_ODS_POC"]["camt053_entries"]
+
+# ---------- Query ----------
+cur.execute("""
+SELECT
+  MsgId,
+  StmtId,
+  IBAN,
+  AcctCcy,
+  Amt,
+  AmtCcy,
+  DbCrInd,
+  BookDt,
+  ValDt,
+  ntry_json
+FROM camt053_entry_view
+""")
+
+ops = []
+BATCH = 1000
+
+for r in cur:
+    (msg_id, stmt_id, iban, acct_ccy,
+     amt, amt_ccy, dbcr, book_dt, val_dt, ntry_clob) = r
+
+    raw = json.loads(ntry_clob.read())
+
+    doc = {
+        "_id": f"{msg_id}|{stmt_id}|{raw.get('NtryRef', '')}",
+        "msg_id": msg_id,
+        "stmt_id": stmt_id,
+        "acct": {
+            "iban": iban,
+            "ccy": acct_ccy
+        },
+        "entry": {
+            "amount": amt,
+            "ccy": amt_ccy,
+            "db_cr_ind": dbcr,
+            "booking_date": book_dt,
+            "value_date": val_dt
+        },
+        "raw": raw,
+        "load_ts": datetime.utcnow().isoformat()
+    }
+
+    ops.append(ReplaceOne({"_id": doc["_id"]}, doc, upsert=True))
+
+    if len(ops) >= BATCH:
+        col.bulk_write(ops, ordered=False)
+        ops.clear()
+
+if ops:
+    col.bulk_write(ops, ordered=False)
+
+cur.close()
+ora.close()
+mongo.close()
+
+-----------------------------
+
+
+
+
+import json
+import oracledb
+from pymongo import MongoClient, ReplaceOne
 
 # ---------- Oracle connection ----------
 oracledb.init_oracle_client()  # optional if Instant Client is configured
