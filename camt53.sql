@@ -1,4 +1,15 @@
 SELECT
+  XMLQUERY(
+    'declare namespace ns="urn:iso:std:iso:20022:tech:xsd:camt.053.001.02";
+     /root/ns:GrpHdr'
+    PASSING xml_doc
+    RETURNING CONTENT
+  )
+FROM your_table
+WHERE ROWNUM = 1;
+
+
+SELECT
     id AS _id,
     TO_CHAR(ts_col,'YYYY-MM-DD"T"HH24:MI:SS') AS timestamp,
     JSON_OBJECT(
