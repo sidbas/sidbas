@@ -1,4 +1,44 @@
 SELECT
+  gh.MsgId,
+  stmt.StmtId,
+
+  -- Entry counts
+  stmt.TtlCdtNtries,
+  stmt.TtlDbtNtries,
+
+  -- Entry sums
+  stmt.TtlCdtSum,
+  stmt.TtlDbtSum
+FROM your_table t
+
+LEFT JOIN XMLTABLE(
+  XMLNAMESPACES(
+    'urn:iso:std:iso:20022:tech:xsd:camt.053.001.xx' AS "ns"
+  ),
+  '/root/ns:group/ns:GrpHdr'
+  PASSING t.xml_doc
+  COLUMNS
+    MsgId VARCHAR2(35) PATH 'ns:MsgId'
+) gh ON 1=1
+
+LEFT JOIN XMLTABLE(
+  XMLNAMESPACES(
+    'urn:iso:std:iso:20022:tech:xsd:camt.053.001.xx' AS "ns"
+  ),
+  '/root/ns:transaction/ns:Stmt'
+  PASSING t.xml_doc
+  COLUMNS
+    StmtId          VARCHAR2(35) PATH 'ns:Id',
+    TtlCdtNtries   NUMBER       PATH 'ns:TtlNtries/ns:TtlCdtNtries',
+    TtlDbtNtries   NUMBER       PATH 'ns:TtlNtries/ns:TtlDbtNtries',
+    TtlCdtSum      NUMBER       PATH 'ns:TtlNtries/ns:TtlCdtSum',
+    TtlDbtSum      NUMBER       PATH 'ns:TtlNtries/ns:TtlDbtSum'
+) stmt ON 1=1;
+
+
+
+
+SELECT
   t.id AS src_id,
 
   gh.MsgId,
