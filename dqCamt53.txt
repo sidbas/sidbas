@@ -34,5 +34,87 @@
       "stmt_id": "$_id.stmt_id",
       "calc": { "$arrayToObject": "$calc" }
     }
+  },
+  {
+    "$lookup": {
+      "from": "camt053_stmt_totals",
+      "let": { "k": { "$concat": ["$msg_id", "|", "$stmt_id"] } },
+      "pipeline": [
+        { "$match": { "$expr": { "$eq": ["$_id", "$$k"] } } }
+      ],
+      "as": "reported"
+    }
+  },
+  {
+    "$unwind": "$reported"
+  }
+]
+
+
+{
+  "$addFields": {
+    "dq_status": {
+      "$cond": [
+        {
+          "$or": [
+            { "$ne": ["$calc.CRDT.count", "$reported.reported.credit_count"] },
+            { "$ne": ["$calc.DBIT.count", "$reported.reported.debit_count"] },
+            {
+              "$gt": [
+                { "$abs": { "$subtract": ["$calc.CRDT.sum", "$reported.reported.credit_sum"] } },
+                0.01
+              ]
+            },
+            {
+              "$gt": [
+                { "$abs": { "$subtract": ["$calc.DBIT.sum", "$reported.reported.debit_sum"] } },
+                0.01
+              ]
+            }
+          ]
+        },
+        "FAIL",
+        "PASS"
+      ]
+    }
+  }
+}
+
+[
+  {
+    "$group": {
+      "_id": {
+        "msg_id": "$msg_id",
+        "stmt_id": "$stmt_id",
+        "dbcr": "$entry.db_cr_ind"
+      },
+      "count": { "$sum": 1 },
+      "sum": { "$sum": "$entry.amount" }
+    }
+  },
+  {
+    "$group": {
+      "_id": {
+        "msg_id": "$_id.msg_id",
+        "stmt_id": "$_id.stmt_id"
+      },
+      "calc": {
+        "$push": {
+          "k": "$_id.dbcr",
+          "v": {
+            "count": "$count",
+            "sum": "$sum"
+          }
+        }
+      }
+    }
+  },
+  {
+    "$project": {
+      "_id": 0,
+      "msg_id": "$_id.msg_id",
+      "stmt_id": "$_id.stmt_id",
+      "calc": { "$arrayToObject": "$calc" }
+    }
   }
 ]
