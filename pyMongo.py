@@ -1,3 +1,78 @@
+#database.py
+from pymongo import MongoClient
+from app.config import MONGO_URI, MONGO_DB
+
+client = MongoClient(MONGO_URI)
+db = client[MONGO_DB]
+
+def get_collection(name: str):
+    return db[name]
+
+#models.py
+from pydantic import BaseModel
+from typing import Optional
+
+class Entry(BaseModel):
+    msg_id: str
+    stmt_id: str
+    iban: str
+    booking_date: str
+    amount: float
+    currency: str
+    db_cr_ind: str
+
+
+#entries.py
+from fastapi import APIRouter, Query
+from app.database import get_collection
+from app.models import Entry
+
+router = APIRouter()
+col = get_collection("camt053_entries")
+
+@router.get("/entries", response_model=list[Entry])
+def get_entries(
+    iban: str = Query(...),
+    from_date: str = Query(..., regex=r"\d{4}-\d{2}-\d{2}"),
+    to_date: str = Query(..., regex=r"\d{4}-\d{2}-\d{2}")
+):
+    cursor = col.find(
+        {
+            "acct.iban": iban,
+            "entry.booking_date": {
+                "$gte": from_date,
+                "$lte": to_date
+            }
+        },
+        {
+            "_id": 0,
+            "msg_id": 1,
+            "stmt_id": 1,
+            "acct.iban": 1,
+            "entry.booking_date": 1,
+            "entry.amount": 1,
+            "entry.ccy": 1,
+            "entry.db_cr_ind": 1
+        }
+    )
+
+    return [
+        Entry(
+            msg_id=d["msg_id"],
+            stmt_id=d["stmt_id"],
+            iban=d["acct"]["iban"],
+            booking_date=d["entry"]["booking_date"],
+            amount=d["entry"]["amount"],
+            currency=d["entry"]["ccy"],
+            db_cr_ind=d["entry"]["db_cr_ind"]
+        )
+        for d in cursor
+    ]
+
+
+
+
+
 #config.py
 ORACLE_DSN = "HOST:PORT/SERVICE"
 ORACLE_USER = "ORA_USER"
