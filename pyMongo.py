@@ -70,7 +70,17 @@ def get_entries(
     ]
 
 
+#main.py
+from fastapi import FastAPI
+from app.routes.entries import router as entries_router
 
+app = FastAPI(
+    title="CAMT.053 API",
+    description="Transaction access API",
+    version="1.0"
+)
+
+app.include_router(entries_router)
 
 
 #config.py
